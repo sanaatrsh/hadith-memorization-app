@@ -1,0 +1,67 @@
+<?php
+
+declare(strict_types=1);
+
+namespace App\OpenApi\Schemas;
+
+use OpenApi\Attributes as OA;
+
+#[OA\Schema(
+    schema: 'Book',
+    properties: [
+        new OA\Property(property: 'id', type: 'integer', example: 2),
+        new OA\Property(property: 'title', type: 'string', example: 'رياض الصالحين'),
+        new OA\Property(property: 'description', type: 'string', nullable: true, example: 'كتاب في الأحاديث النبوية.'),
+        new OA\Property(property: 'is_active', type: 'boolean', example: true),
+        new OA\Property(property: 'sort_order', type: 'integer', example: 1),
+        new OA\Property(property: 'cover_url', type: 'string', nullable: true, example: 'http://localhost/storage/2/cover.jpg'),
+        new OA\Property(property: 'hadiths_count', type: 'integer', nullable: true, example: 40),
+    ],
+    type: 'object',
+)]
+#[OA\Schema(
+    schema: 'BookRequest',
+    required: ['title'],
+    properties: [
+        new OA\Property(property: 'title', type: 'string', maxLength: 255, example: 'رياض الصالحين'),
+        new OA\Property(property: 'description', type: 'string', nullable: true, example: 'كتاب في الأحاديث النبوية.'),
+        new OA\Property(property: 'is_active', type: 'boolean', example: true),
+        new OA\Property(property: 'sort_order', type: 'integer', example: 1),
+    ],
+    type: 'object',
+)]
+#[OA\Schema(
+    schema: 'UserBook',
+    properties: [
+        new OA\Property(property: 'id', type: 'integer', example: 9),
+        new OA\Property(property: 'book_id', type: 'integer', example: 2),
+        new OA\Property(property: 'started_at', type: 'string', format: 'date-time', nullable: true),
+        new OA\Property(property: 'completed_at', type: 'string', format: 'date-time', nullable: true),
+        new OA\Property(property: 'book', ref: '#/components/schemas/Book', nullable: true),
+    ],
+    type: 'object',
+)]
+#[OA\Schema(
+    schema: 'NarratorRequest',
+    required: ['name'],
+    properties: [
+        new OA\Property(property: 'name', type: 'string', maxLength: 255, example: 'عمر بن الخطاب'),
+        new OA\Property(property: 'biography', type: 'string', nullable: true, example: 'أمير المؤمنين.'),
+    ],
+    type: 'object',
+)]
+#[OA\Schema(
+    schema: 'HadithRequest',
+    required: ['book_id', 'title', 'text'],
+    properties: [
+        new OA\Property(property: 'book_id', type: 'integer', example: 2),
+        new OA\Property(property: 'narrator_id', type: 'integer', nullable: true, example: 3),
+        new OA\Property(property: 'title', type: 'string', maxLength: 255, example: 'إنما الأعمال بالنيات'),
+        new OA\Property(property: 'text', type: 'string', example: 'إنما الأعمال بالنيات وإنما لكل امرئ ما نوى'),
+        new OA\Property(property: 'source', type: 'string', nullable: true, example: 'صحيح البخاري'),
+        new OA\Property(property: 'is_active', type: 'boolean', example: true),
+        new OA\Property(property: 'sort_order', type: 'integer', example: 1),
+    ],
+    type: 'object',
+)]
+final class BookSchemas {}

@@ -104,6 +104,21 @@ class HadithController extends Controller
             new OA\Response(response: 422, description: 'Validation failed.', content: new OA\JsonContent(ref: '#/components/schemas/ValidationError')),
         ],
     )]
+    #[OA\Patch(
+        path: '/admin/hadiths/{hadith}',
+        operationId: 'adminPatchHadith',
+        summary: 'Partially update a hadith (admin)',
+        tags: ['Admin - Hadiths'],
+        security: [['sanctum' => []]],
+        parameters: [new OA\Parameter(name: 'hadith', in: 'path', required: true, schema: new OA\Schema(type: 'integer'))],
+        requestBody: new OA\RequestBody(required: true, content: new OA\JsonContent(ref: '#/components/schemas/HadithRequest')),
+        responses: [
+            new OA\Response(response: 200, description: 'Updated.', content: new OA\JsonContent(ref: '#/components/schemas/SuccessMessage')),
+            new OA\Response(response: 403, description: 'Admin only.', content: new OA\JsonContent(ref: '#/components/schemas/ForbiddenError')),
+            new OA\Response(response: 404, description: 'Not found.', content: new OA\JsonContent(ref: '#/components/schemas/NotFoundError')),
+            new OA\Response(response: 422, description: 'Validation failed.', content: new OA\JsonContent(ref: '#/components/schemas/ValidationError')),
+        ],
+    )]
     public function update(UpdateHadithRequest $request, Hadith $hadith)
     {
         $hadith->update($request->validated());

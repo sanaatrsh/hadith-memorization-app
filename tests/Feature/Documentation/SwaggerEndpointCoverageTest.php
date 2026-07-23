@@ -49,4 +49,23 @@ class SwaggerEndpointCoverageTest extends TestCase
         $this->assertStringNotContainsString('x-goog-api-key', $raw);
         $this->assertStringNotContainsString('GEMINI_API_KEY', $raw);
     }
+
+    public function test_generated_document_includes_patch_operations_exposed_by_admin_resources(): void
+    {
+        $this->artisan('l5-swagger:generate')->assertExitCode(0);
+
+        $document = json_decode(
+            file_get_contents(storage_path('api-docs/api-docs.json')),
+            true,
+            flags: JSON_THROW_ON_ERROR,
+        );
+
+        foreach ([
+            '/admin/books/{book}',
+            '/admin/narrators/{narrator}',
+            '/admin/hadiths/{hadith}',
+        ] as $path) {
+            $this->assertArrayHasKey('patch', $document['paths'][$path]);
+        }
+    }
 }

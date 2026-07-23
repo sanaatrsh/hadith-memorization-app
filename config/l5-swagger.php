@@ -5,6 +5,10 @@ use L5Swagger\CustomGeneratorInterface;
 use L5Swagger\Generator;
 use OpenApi\scan;
 
+$swaggerMiddleware = env('L5_SWAGGER_RESTRICT_ACCESS', false)
+    ? [EnsureSwaggerAccess::class]
+    : [];
+
 return [
     'default' => 'default',
     'documentations' => [
@@ -71,10 +75,14 @@ return [
              * Middleware allows to prevent unexpected access to API documentation
              */
             'middleware' => [
-                'api' => [EnsureSwaggerAccess::class],
-                'asset' => [EnsureSwaggerAccess::class],
-                'docs' => [EnsureSwaggerAccess::class],
-                'oauth2_callback' => [EnsureSwaggerAccess::class],
+                // Swagger UI must fetch its OpenAPI document before a user can
+                // authorize API calls in the browser. Keep every Swagger route
+                // public by default, or set L5_SWAGGER_RESTRICT_ACCESS=true and
+                // protect the routes through the existing middleware.
+                'api' => $swaggerMiddleware,
+                'asset' => $swaggerMiddleware,
+                'docs' => $swaggerMiddleware,
+                'oauth2_callback' => $swaggerMiddleware,
             ],
 
             /*

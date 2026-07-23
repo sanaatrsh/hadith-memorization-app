@@ -80,6 +80,21 @@ class NarratorController extends Controller
             new OA\Response(response: 422, description: 'Validation failed.', content: new OA\JsonContent(ref: '#/components/schemas/ValidationError')),
         ],
     )]
+    #[OA\Patch(
+        path: '/admin/narrators/{narrator}',
+        operationId: 'adminPatchNarrator',
+        summary: 'Partially update a narrator (admin)',
+        tags: ['Admin - Narrators'],
+        security: [['sanctum' => []]],
+        parameters: [new OA\Parameter(name: 'narrator', in: 'path', required: true, schema: new OA\Schema(type: 'integer'))],
+        requestBody: new OA\RequestBody(required: true, content: new OA\JsonContent(ref: '#/components/schemas/NarratorRequest')),
+        responses: [
+            new OA\Response(response: 200, description: 'Updated.', content: new OA\JsonContent(ref: '#/components/schemas/SuccessMessage')),
+            new OA\Response(response: 403, description: 'Admin only.', content: new OA\JsonContent(ref: '#/components/schemas/ForbiddenError')),
+            new OA\Response(response: 404, description: 'Not found.', content: new OA\JsonContent(ref: '#/components/schemas/NotFoundError')),
+            new OA\Response(response: 422, description: 'Validation failed.', content: new OA\JsonContent(ref: '#/components/schemas/ValidationError')),
+        ],
+    )]
     public function update(UpdateNarratorRequest $request, Narrator $narrator)
     {
         $narrator->update($request->validated());

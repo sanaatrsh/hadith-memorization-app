@@ -1,6 +1,6 @@
 # Athar API reference
 
-Athar is an Arabic-first API for memorizing hadiths, reviewing them with spaced repetition, and completing exams. The interactive OpenAPI reference is served at `/api/documentation`; its JSON definition is served at `/docs`.
+Athar is an Arabic-first API for memorizing hadiths, reviewing them with spaced repetition, and completing exams. The interactive OpenAPI reference is served at `/api/documentation`; its JSON definition is served at `/openapi`.
 
 ## Quick start
 

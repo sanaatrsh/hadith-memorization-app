@@ -80,7 +80,7 @@ Interactive Swagger UI (L5-Swagger) with the Sanctum bearer scheme:
 
 ```text
 GET /api/documentation      # Swagger UI
-GET /docs                   # raw OpenAPI JSON
+GET /openapi                # raw OpenAPI JSON
 ```
 
 Regenerate the OpenAPI document:

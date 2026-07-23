@@ -63,8 +63,11 @@ return [
         'routes' => [
             /*
              * Route for accessing parsed swagger annotations.
+             * Uses 'openapi' (not 'docs') to avoid a physical `docs` directory
+             * collision and the host's trailing-slash 301 redirect that breaks
+             * the Swagger UI fetch. Served at GET /openapi?api-docs.json.
              */
-            'docs' => 'docs',
+            'docs' => 'openapi',
 
             /*
              * Route for Oauth2 authentication callback.

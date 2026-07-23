@@ -19,7 +19,7 @@ class SwaggerAccessTest extends TestCase
 
     public function test_openapi_json_is_accessible_in_testing_environment(): void
     {
-        $this->get('/docs')
+        $this->get('/openapi')
             ->assertOk()
             ->assertJsonStructure(['openapi', 'info', 'paths']);
     }

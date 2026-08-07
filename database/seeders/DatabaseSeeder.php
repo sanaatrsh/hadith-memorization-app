@@ -12,5 +12,9 @@ class DatabaseSeeder extends Seeder
     public function run(): void
     {
         $this->call(ArabicDemoSeeder::class);
+
+        // Runs after the demo catalogue so the authentic wording of the shared
+        // hadiths (نية / من كان يؤمن بالله واليوم الآخر) is the one that lands.
+        $this->call(NawawiFortySeeder::class);
     }
 }

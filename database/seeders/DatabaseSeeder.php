@@ -16,5 +16,8 @@ class DatabaseSeeder extends Seeder
         // Runs after the demo catalogue so the authentic wording of the shared
         // hadiths (نية / من كان يؤمن بالله واليوم الآخر) is the one that lands.
         $this->call(NawawiFortySeeder::class);
+
+        // Needs the collection above: its exams quote real hadiths from it.
+        $this->call(ArabicExamSeeder::class);
     }
 }

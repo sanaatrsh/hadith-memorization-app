@@ -17,7 +17,9 @@ class DatabaseSeeder extends Seeder
         // hadiths (نية / من كان يؤمن بالله واليوم الآخر) is the one that lands.
         $this->call(NawawiFortySeeder::class);
 
-        // Needs the collection above: its exams quote real hadiths from it.
+        // Both need the collection above: they quote real hadiths from it, and
+        // the memorization history attaches to whichever users already exist.
         $this->call(ArabicExamSeeder::class);
+        $this->call(ArabicMemorizationSeeder::class);
     }
 }

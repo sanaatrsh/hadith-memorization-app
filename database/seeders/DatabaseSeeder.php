@@ -13,6 +13,10 @@ class DatabaseSeeder extends Seeder
     {
         $this->call(ArabicDemoSeeder::class);
 
+        // Runs after the demo seeder so an explicitly configured admin
+        // password (ADMIN_PASSWORD) wins over its hardcoded one.
+        $this->call(AdminSeeder::class);
+
         // Runs after the demo catalogue so the authentic wording of the shared
         // hadiths (نية / من كان يؤمن بالله واليوم الآخر) is the one that lands.
         $this->call(NawawiFortySeeder::class);

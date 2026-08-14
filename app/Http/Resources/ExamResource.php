@@ -15,6 +15,7 @@ class ExamResource extends JsonResource
             'id' => $this->id,
             'user_id' => $this->user_id,
             'book_id' => $this->book_id,
+            'book_title' => $this->whenLoaded('book', fn () => $this->book->title),
             'status' => $this->status,
             'question_count' => $this->question_count,
             'score' => $this->score,

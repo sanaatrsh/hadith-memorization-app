@@ -14,10 +14,39 @@ use App\Models\ExamQuestion;
 use App\Models\UserBook;
 use App\Services\ExamAnswerEvaluator;
 use App\Support\ApiResponse;
+use Illuminate\Http\Request;
 use OpenApi\Attributes as OA;
 
 class ExamController extends Controller
 {
+    #[OA\Get(
+        path: '/exams',
+        operationId: 'listExams',
+        summary: "List the authenticated user's exams",
+        description: 'Newest first. Questions and answers are not included; fetch a single exam for its questions.',
+        tags: ['Exams'],
+        security: [['sanctum' => []]],
+        parameters: [
+            new OA\Parameter(name: 'page', in: 'query', required: false, schema: new OA\Schema(type: 'integer', example: 1)),
+        ],
+        responses: [
+            new OA\Response(response: 200, description: 'Paginated exams.', content: new OA\JsonContent(properties: [
+                new OA\Property(property: 'data', type: 'array', items: new OA\Items(ref: '#/components/schemas/Exam')),
+                new OA\Property(property: 'meta', ref: '#/components/schemas/PaginationMeta'),
+            ], type: 'object')),
+            new OA\Response(response: 401, description: 'Unauthenticated.', content: new OA\JsonContent(ref: '#/components/schemas/UnauthenticatedError')),
+        ],
+    )]
+    public function index(Request $request)
+    {
+        $exams = Exam::where('user_id', $request->user()->id)
+            ->with('book')
+            ->orderByDesc('id')
+            ->paginate(20);
+
+        return ExamResource::collection($exams);
+    }
+
     #[OA\Post(
         path: '/exams',
         operationId: 'createExam',

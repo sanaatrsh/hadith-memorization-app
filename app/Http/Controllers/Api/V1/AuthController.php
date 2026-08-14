@@ -84,6 +84,46 @@ class AuthController extends Controller
     }
 
     #[OA\Post(
+        path: '/auth/admin/login',
+        operationId: 'adminLogin',
+        summary: 'Log in as an administrator',
+        description: 'Same credential check as /auth/login, but rejects accounts that do not have the admin role. Use this for the admin panel. Rate limited to 10 requests/minute.',
+        tags: ['Authentication'],
+        requestBody: new OA\RequestBody(required: true, content: new OA\JsonContent(ref: '#/components/schemas/LoginRequest')),
+        responses: [
+            new OA\Response(response: 200, description: 'Login successful.', content: new OA\JsonContent(ref: '#/components/schemas/AuthResponse')),
+            new OA\Response(response: 403, description: 'Account is not an administrator, or is inactive.', content: new OA\JsonContent(ref: '#/components/schemas/ForbiddenError')),
+            new OA\Response(response: 422, description: 'Invalid credentials / validation failed.', content: new OA\JsonContent(ref: '#/components/schemas/ValidationError')),
+            new OA\Response(response: 429, description: 'Too many requests.', content: new OA\JsonContent(ref: '#/components/schemas/RateLimitError')),
+        ],
+    )]
+    public function adminLogin(LoginRequest $request)
+    {
+        $user = User::where('email', $request->string('email'))->first();
+
+        if (! $user || ! Hash::check($request->string('password'), $user->password)) {
+            throw ValidationException::withMessages([
+                'email' => ['The provided credentials are incorrect.'],
+            ]);
+        }
+
+        if (! $user->isAdmin()) {
+            return ApiResponse::error('This account does not have administrator access.', 403);
+        }
+
+        if (! $user->is_active) {
+            return ApiResponse::error('Your account is inactive.', 403);
+        }
+
+        $token = $user->createToken($request->input('device_name', 'admin-panel'))->plainTextToken;
+
+        return ApiResponse::success([
+            'user' => new UserResource($user),
+            'token' => $token,
+        ], 'Logged in successfully.');
+    }
+
+    #[OA\Post(
         path: '/auth/logout',
         operationId: 'logout',
         summary: 'Log out (revoke current token)',

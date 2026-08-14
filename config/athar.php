@@ -60,4 +60,18 @@ return [
         // verdicts and reports are always kept.
         'transcript_retention_days' => (int) env('ATTEMPT_TRANSCRIPT_RETENTION_DAYS', 180),
     ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Seeded Administrator
+    |--------------------------------------------------------------------------
+    | Used by AdminSeeder so a real deployment can seed its own admin account
+    | from the environment instead of shipping a hardcoded password. The
+    | defaults match the demo admin ArabicDemoSeeder creates for local/testing.
+    */
+    'admin' => [
+        'name' => env('ADMIN_NAME', 'مدير أثر'),
+        'email' => env('ADMIN_EMAIL', 'admin@athar.test'),
+        'password' => env('ADMIN_PASSWORD', 'password'),
+    ],
 ];

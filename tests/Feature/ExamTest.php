@@ -31,6 +31,30 @@ class ExamTest extends TestCase
         return $book;
     }
 
+    public function test_it_lists_only_the_authenticated_users_exams_newest_first(): void
+    {
+        Sanctum::actingAs($user = User::factory()->create());
+        $book = $this->setupBookForUser($user);
+        QuestionTemplate::factory()->create();
+
+        $olderId = $this->postJson('/api/v1/exams', ['book_id' => $book->id, 'question_count' => 1])->json('data.id');
+        $newerId = $this->postJson('/api/v1/exams', ['book_id' => $book->id, 'question_count' => 1])->json('data.id');
+
+        $otherBook = $this->setupBookForUser($other = User::factory()->create());
+        Sanctum::actingAs($other);
+        $this->postJson('/api/v1/exams', ['book_id' => $otherBook->id, 'question_count' => 1]);
+
+        Sanctum::actingAs($user);
+        $response = $this->getJson('/api/v1/exams')
+            ->assertOk()
+            ->assertJsonCount(2, 'data')
+            ->assertJsonPath('data.0.id', $newerId)
+            ->assertJsonPath('data.1.id', $olderId)
+            ->assertJsonPath('data.0.book_title', $book->title);
+
+        $this->assertArrayNotHasKey('questions', $response->json('data.0'));
+    }
+
     public function test_exam_generation_uses_only_stored_templates_and_book_content(): void
     {
         Sanctum::actingAs($user = User::factory()->create());

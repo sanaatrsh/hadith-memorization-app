@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Enums\UserRole;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
@@ -42,6 +43,52 @@ class AuthTest extends TestCase
 
         $this->postJson('/api/v1/auth/login', [
             'email' => $user->email,
+            'password' => 'secret123',
+        ])->assertStatus(403);
+    }
+
+    public function test_admin_can_login_through_the_admin_endpoint(): void
+    {
+        $admin = User::factory()->admin()->create(['password' => bcrypt('secret123')]);
+
+        $this->postJson('/api/v1/auth/admin/login', [
+            'email' => $admin->email,
+            'password' => 'secret123',
+        ])
+            ->assertOk()
+            ->assertJsonPath('success', true)
+            ->assertJsonPath('data.user.role', 'admin')
+            ->assertJsonStructure(['data' => ['token']]);
+    }
+
+    public function test_a_regular_user_cannot_login_through_the_admin_endpoint(): void
+    {
+        $user = User::factory()->create(['role' => UserRole::User, 'password' => bcrypt('secret123')]);
+
+        $this->postJson('/api/v1/auth/admin/login', [
+            'email' => $user->email,
+            'password' => 'secret123',
+        ])->assertStatus(403);
+
+        $this->assertDatabaseCount('personal_access_tokens', 0);
+    }
+
+    public function test_admin_login_rejects_wrong_password(): void
+    {
+        $admin = User::factory()->admin()->create(['password' => bcrypt('secret123')]);
+
+        $this->postJson('/api/v1/auth/admin/login', [
+            'email' => $admin->email,
+            'password' => 'wrong-password',
+        ])->assertStatus(422);
+    }
+
+    public function test_inactive_admin_cannot_login_through_the_admin_endpoint(): void
+    {
+        $admin = User::factory()->admin()->inactive()->create(['password' => bcrypt('secret123')]);
+
+        $this->postJson('/api/v1/auth/admin/login', [
+            'email' => $admin->email,
             'password' => 'secret123',
         ])->assertStatus(403);
     }

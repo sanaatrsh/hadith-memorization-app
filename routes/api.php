@@ -52,6 +52,7 @@ Route::prefix('v1')->group(function () {
     Route::middleware('throttle:10,1')->group(function () {
         Route::post('/auth/register', [AuthController::class, 'register']);
         Route::post('/auth/login', [AuthController::class, 'login']);
+        Route::post('/auth/admin/login', [AuthController::class, 'adminLogin']);
     });
 
     // --- Authenticated ---
@@ -78,6 +79,7 @@ Route::prefix('v1')->group(function () {
 
     // --- Exam lifecycle ---
     Route::middleware(['auth:sanctum', 'active', 'throttle:20,1'])->group(function () {
+        Route::get('/exams', [ExamController::class, 'index']);
         Route::post('/exams', [ExamController::class, 'store']);
         Route::get('/exams/{exam}', [ExamController::class, 'show']);
         Route::post('/exams/{exam}/complete', [ExamController::class, 'complete']);

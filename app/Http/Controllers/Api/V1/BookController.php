@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Api\V1;
 
+use App\Enums\MemorizationStatus;
 use App\Http\Controllers\Controller;
 use App\Http\Resources\BookResource;
 use App\Http\Resources\HadithResource;
@@ -28,8 +29,13 @@ class BookController extends Controller
     )]
     public function index()
     {
+        // Every user sees the whole catalogue; `is_added` tells the app which
+        // ones they added to their learning list to memorize.
         $books = Book::where('is_active', true)
             ->withCount(['hadiths' => fn ($q) => $q->where('is_active', true)])
+            ->when(auth('sanctum')->check(), fn ($q) => $q
+                ->with('currentUserBook')
+                ->withCount(['currentUserProgress as memorized_count' => fn ($p) => $p->where('user_hadith_progress.status', MemorizationStatus::Memorized->value)]))
             ->orderBy('sort_order')
             ->orderBy('id')
             ->paginate(20);
@@ -56,6 +62,11 @@ class BookController extends Controller
         abort_unless($book->is_active, 404);
 
         $book->loadCount(['hadiths' => fn ($q) => $q->where('is_active', true)]);
+
+        if (auth('sanctum')->check()) {
+            $book->load('currentUserBook');
+            $book->loadCount(['currentUserProgress as memorized_count' => fn ($p) => $p->where('user_hadith_progress.status', MemorizationStatus::Memorized->value)]);
+        }
 
         return ApiResponse::success(new BookResource($book), 'Book retrieved successfully.');
     }
@@ -84,6 +95,7 @@ class BookController extends Controller
         $hadiths = $book->hadiths()
             ->where('is_active', true)
             ->with('narrator')
+            ->when(auth('sanctum')->check(), fn ($q) => $q->with(['currentUserProgress', 'currentUserStackItem']))
             ->orderBy('sort_order')
             ->orderBy('id')
             ->paginate(20);

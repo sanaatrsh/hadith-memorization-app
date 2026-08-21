@@ -138,10 +138,19 @@ Store the token securely in the client and send it on later requests. A failed p
 
 | Method | Endpoint | Access | Request | Response |
 | --- | --- | --- | --- | --- |
-| GET | `/books?page=1` | Public | Optional `page`. | Paginated active `Book` resources. |
-| GET | `/books/{book}` | Public | Book ID path parameter. | Envelope containing one active `Book`. |
+| GET | `/books?page=1` | Public; token optional | Optional `page`. | Paginated active `Book` resources — the whole catalogue. With a token each book also carries `is_added`, `added_at`, and `memorized_count`. |
+| GET | `/books/{book}` | Public; token optional | Book ID path parameter. | Envelope containing one active `Book` (with `is_added` / `memorized_count` when a token is supplied). |
 | GET | `/books/{book}/hadiths?page=1` | Public | Book ID and optional `page`. | Paginated active `Hadith` resources with narrator. |
-| GET | `/hadiths/{hadith}` | Public; token optional | Hadith ID path parameter. | Envelope containing canonical text, narrator, terms, aids, media URLs, and authenticated user's progress when a token is supplied. |
+| GET | `/hadiths/{hadith}` | Public; token optional | Hadith ID path parameter. | Envelope containing `intro` (مقدمة الحديث), canonical text, narrator, terms, aids, media URLs, and — with a token — the user's progress and whether the hadith is on their memorization stack. |
+
+Reading is open: every active book and hadith is readable by anyone. Adding a
+book to the learning list (`POST /user/books/{book}/start`) is what starts
+memorization (التسميع) — it is required to recite a hadith of that book or to
+push one onto the memorization stack.
+
+`intro` is the isnad/context line a hadith opens with — «عن عمر بن الخطاب رضي
+الله عنه قال» or «بينما نحن جلوس عند رسول الله ﷺ». It is stored apart from
+`text` so recall is only ever scored against the matn.
 
 ### Book-list response example
 
@@ -156,6 +165,9 @@ Store the token securely in the client and send it on later requests. A failed p
       "sort_order": 1,
       "cover_url": null,
       "hadiths_count": 2,
+      "is_added": true,
+      "added_at": "2026-07-23T00:00:00.000000Z",
+      "memorized_count": 12,
       "created_at": "2026-07-23T00:00:00.000000Z",
       "updated_at": "2026-07-23T00:00:00.000000Z"
     }
@@ -167,7 +179,10 @@ Store the token securely in the client and send it on later requests. A failed p
 
 ## Learning, memorization, and review
 
-All endpoints in this section require an active token. The learner must first select a book; selection is idempotent and is required before attempting a hadith or generating an exam from that book.
+All endpoints in this section require an active token. The learner must first
+add a book; adding is idempotent and is required before reciting a hadith of
+that book or pushing one onto the memorization stack. Exams may be taken on any
+active book.
 
 | Method | Endpoint | Request body | Response / explanation |
 | --- | --- | --- | --- |
@@ -176,6 +191,9 @@ All endpoints in this section require an active token. The learner must first se
 | DELETE | `/user/books/{book}` | None | Removes the book selection but preserves attempts and progress. |
 | GET | `/user/progress` | None | Dashboard envelope: active books, total/status counts, due review count, and current empty `recent_attempts` list. |
 | GET | `/user/reviews/due?page=1` | Optional `page` | Paginated due `UserProgress` resources. |
+| GET | `/user/memorization/stack?limit=20` | Optional `limit` (1–100, default 20) | The memorization stack: what to memorize next, top first. |
+| POST | `/user/memorization/stack` | `hadith_id`, optional `reason` | Pushes a hadith onto the top of the stack (`201`). Pushing one already on it moves it back to the top instead of duplicating. |
+| DELETE | `/user/memorization/stack/{hadith}` | None | Pops the hadith off the stack; progress and attempt history are kept. |
 | POST | `/memorization/attempts` | See example below. | Deterministic transcript evaluation, with optional Gemini feedback. 30/min. |
 | POST | `/reviews/{hadith}/attempts` | Same as memorization without `hadith_id`. | Same evaluation, tagged as a review. 30/min. |
 
@@ -206,6 +224,71 @@ Accept: application/json
   }
 }
 ```
+
+### The memorization stack
+
+`GET /user/memorization/stack` is the queue the app reads from. It is layered,
+top first:
+
+1. **Pushed items** — hadiths explicitly put back on the stack, LIFO. The user's
+   own review requests (`source: user`) sit above the ones the evaluator
+   (`source: evaluation`) or Gemini (`source: ai`) flagged; within a source the
+   newest push is on top.
+2. **Due reviews** — spaced-repetition dates that have arrived, earliest first.
+3. **Not memorized yet** — the most recently added book first, then that book's
+   own order (`sort_order`).
+
+Layers 2 and 3 only draw on books in the learning list, and memorized hadiths
+drop out until their review comes due.
+
+Pushes happen three ways:
+
+- The user asks for it: `POST /user/memorization/stack`.
+- The evaluation scores a recitation below `athar.scoring.passing` — the hadith
+  is pushed with `source: evaluation`.
+- Gemini recommends `repeat_now` / `review_later`, or returns a
+  `needs_review` / `incorrect` verdict — pushed with `source: ai` and Gemini's
+  Arabic feedback as `reason`. This applies even when the deterministic score
+  passed.
+
+A recitation at or above the passing score with no Gemini objection pops the
+hadith off the stack automatically.
+
+```json
+GET /api/v1/user/memorization/stack?limit=20
+
+{
+  "success": true,
+  "message": "Memorization stack retrieved successfully.",
+  "data": {
+    "total": 8,
+    "pushed_count": 2,
+    "items": [
+      {
+        "position": 1,
+        "queue_reason": "pushed",
+        "source": "user",
+        "reason": "أحتاج مراجعة هذا الحديث.",
+        "pushed_at": "2026-08-21T09:00:00.000000Z",
+        "hadith": { "id": 18, "title": "إنما الأعمال بالنيات", "intro": "عن عمر بن الخطاب رضي الله عنه قال", "text": "..." },
+        "progress": { "status": "reviewing", "srs_level": 2, "best_score": 86, "next_review_at": "2026-08-24T09:00:00.000000Z" }
+      },
+      {
+        "position": 2,
+        "queue_reason": "due_review",
+        "source": null,
+        "reason": null,
+        "pushed_at": null,
+        "hadith": { "id": 21, "title": "بني الإسلام على خمس", "intro": null, "text": "..." },
+        "progress": { "status": "reviewing", "srs_level": 1, "best_score": 92, "next_review_at": "2026-08-20T09:00:00.000000Z" }
+      }
+    ]
+  }
+}
+```
+
+`queue_reason` is `pushed`, `due_review`, or `new`; `source` and `reason` are
+present on pushed entries only.
 
 ### Submit a memorization attempt
 
@@ -256,16 +339,32 @@ Content-Type: application/json
 
 | Method | Endpoint | Request body | Result |
 | --- | --- | --- | --- |
-| POST | `/exams` | `book_id`, `question_count` (1–50). | Creates an in-progress exam (`201`) from active templates and active hadiths in a selected book. |
-| GET | `/exams/{exam}` | None. | Returns the caller's exam and questions; correct answers are not exposed. |
-| POST | `/exams/{exam}/answers` | `exam_question_id`, `answer_text`. | Evaluates and upserts one answer. |
-| POST | `/exams/{exam}/complete` | None. | Marks the caller's exam complete and stores the average answer score. |
+| POST | `/exams` | `book_id`, optional `question_count` (1–200). | Creates an in-progress exam (`201`) covering the whole book: one question per active hadith, from active templates and the book's own content. Any active book may be examined. |
+| GET | `/exams/{exam}` | None. | Returns the caller's exam and questions. While it is in progress each question only shows whether it has been answered; once completed the same endpoint returns the results. |
+| POST | `/exams/{exam}/answers` | `exam_question_id`, `answer_text`. | Evaluates and stores one answer but withholds the result — the response is an acknowledgement with the answered/remaining counts. |
+| POST | `/exams/{exam}/complete` | None. | Completes the exam and releases the results: the overall score plus, for every question, its score and the correct answer. |
+
+**Coverage.** Omitting `question_count` asks about every active hadith in the
+book exactly once, in the book's order, with the question templates rotating so
+the types stay varied. A `question_count` smaller than the book narrows the exam
+to that many distinct hadiths (never repeating one); a larger one is capped at
+the book's hadith count. A template that would ask about something a hadith does
+not carry (no narrator, no takhrij, no `intro`) is skipped for that hadith.
+
+**Deferred results.** Nothing about correctness is disclosed until the exam is
+completed: `results_released` is `false`, `score` is `null`, and questions carry
+neither `correct_answer` nor a per-question score. `POST /exams/{exam}/complete`
+flips `results_released` to `true` and returns, for **every** question — right or
+wrong — its `score`, `is_correct`, `evaluation_report`, and `correct_answer`,
+alongside a `summary` (`total_questions`, `answered_count`, `unanswered_count`,
+`correct_count`, `incorrect_count`, `passing_score`). Unanswered questions count
+as zero in the overall score.
 
 ### Create-exam request and response
 
 ```json
 POST /api/v1/exams
-{ "book_id": 1, "question_count": 3 }
+{ "book_id": 1 }
 ```
 
 ```json
@@ -277,7 +376,8 @@ POST /api/v1/exams
     "user_id": 2,
     "book_id": 1,
     "status": "in_progress",
-    "question_count": 3,
+    "question_count": 42,
+    "results_released": false,
     "score": null,
     "started_at": "2026-07-23T00:00:00.000000Z",
     "completed_at": null,
@@ -288,14 +388,68 @@ POST /api/v1/exams
         "type": "written",
         "question_text": "من هو راوي هذا الحديث؟",
         "sort_order": 0,
-        "answer": null
+        "is_answered": false
       }
     ]
   }
 }
 ```
 
-The database chooses the question IDs and generated questions. Use the ID in the response when submitting an answer. An answer request such as `{"exam_question_id":1,"answer_text":"عمر بن الخطاب"}` returns `exam_question_id`, `score`, `is_correct`, and `evaluation_report` inside `data`.
+The database chooses the question IDs and generated questions. Use the ID in the
+response when submitting an answer. An answer request such as
+`{"exam_question_id":1,"answer_text":"عمر بن الخطاب"}` returns only an
+acknowledgement — `exam_question_id`, `is_answered`, `answered_count`,
+`total_questions`, `remaining_count`, `results_released: false` — because the
+result is released when the exam is completed:
+
+```json
+POST /api/v1/exams/1/complete
+
+{
+  "success": true,
+  "message": "Exam completed successfully.",
+  "data": {
+    "id": 1,
+    "status": "completed",
+    "results_released": true,
+    "score": 76,
+    "summary": {
+      "total_questions": 2,
+      "answered_count": 2,
+      "unanswered_count": 0,
+      "correct_count": 1,
+      "incorrect_count": 1,
+      "passing_score": 90
+    },
+    "questions": [
+      {
+        "id": 1,
+        "hadith_id": 1,
+        "type": "written",
+        "question_text": "من هو راوي هذا الحديث؟",
+        "sort_order": 0,
+        "is_answered": true,
+        "correct_answer": "عمر بن الخطاب",
+        "is_correct": true,
+        "score": 100,
+        "answer": { "answer_text": "عمر بن الخطاب", "score": 100, "is_correct": true, "evaluation_report": { "mode": "exact_match" } }
+      },
+      {
+        "id": 2,
+        "hadith_id": 2,
+        "type": "voice",
+        "question_text": "اذكر الحديث كاملاً من عنوانه: بني الإسلام على خمس",
+        "sort_order": 1,
+        "is_answered": true,
+        "correct_answer": "بني الإسلام على خمس ...",
+        "is_correct": false,
+        "score": 52,
+        "answer": { "answer_text": "...", "score": 52, "is_correct": false, "evaluation_report": { "score": 52, "missing_words": ["..."] } }
+      }
+    ]
+  }
+}
+```
 
 ## Administrator endpoints
 
@@ -305,7 +459,7 @@ All administrator endpoints require a valid token for a user whose `role` is `ad
 | --- | --- | --- | --- |
 | Books | `GET, POST /admin/books`; `GET, PUT, PATCH, DELETE /admin/books/{book}` | Create: `title` required; optional `description`, `is_active`, `sort_order`. Update: same fields, all optional. | Collection for index; `Book` envelope for create/show/update; success envelope for delete. |
 | Narrators | `GET, POST /admin/narrators`; `PUT, PATCH, DELETE /admin/narrators/{narrator}` | Create: `name` required; optional `biography`. Update: same fields optional. | Collection or `Narrator` envelope; success envelope for delete. There is no show route. |
-| Hadiths | `GET, POST /admin/hadiths`; `GET, PUT, PATCH, DELETE /admin/hadiths/{hadith}` | Create: `book_id`, `title`, `text` required; optional `narrator_id`, `source`, `is_active`, `sort_order`. Update: same fields optional. | Collection or full `Hadith` envelope; success envelope for delete. |
+| Hadiths | `GET, POST /admin/hadiths`; `GET, PUT, PATCH, DELETE /admin/hadiths/{hadith}` | Create: `book_id`, `title`, `text` required; optional `intro` (مقدمة الحديث, up to 2000 chars), `narrator_id`, `source`, `is_active`, `sort_order`. Update: same fields optional. | Collection or full `Hadith` envelope; success envelope for delete. |
 | Terms | `GET, POST /admin/hadiths/{hadith}/terms`; `PUT, DELETE /admin/hadiths/{hadith}/terms/{term}` | Create: `term`, `explanation`; update: either or both. | Collection or `HadithTerm` envelope. |
 | Aids | `GET, POST /admin/hadiths/{hadith}/aids`; `PUT, DELETE /admin/hadiths/{hadith}/aids/{aid}` | Create: `title`, `content`; optional `sort_order`. Update: same fields optional. | Collection or `HadithAid` envelope. |
 | Audio | `POST /admin/hadiths/{hadith}/audio`; `POST /admin/hadiths/{hadith}/audio/replace`; `DELETE /admin/hadiths/{hadith}/audio` | Multipart form field `audio`; allowed audio types, maximum 20 MB. | `audio_url` envelope after upload/replace; success envelope after delete. |
@@ -325,6 +479,7 @@ Content-Type: application/json
   "book_id": 1,
   "narrator_id": 1,
   "title": "إنما الأعمال بالنيات",
+  "intro": "عن عمر بن الخطاب رضي الله عنه قال: سمعت رسول الله صلى الله عليه وسلم يقول",
   "text": "إنما الأعمال بالنيات وإنما لكل امرئ ما نوى",
   "source": "صحيح البخاري وصحيح مسلم",
   "is_active": true,
@@ -341,6 +496,7 @@ Content-Type: application/json
     "book_id": 1,
     "narrator_id": 1,
     "title": "إنما الأعمال بالنيات",
+    "intro": "عن عمر بن الخطاب رضي الله عنه قال: سمعت رسول الله صلى الله عليه وسلم يقول",
     "text": "إنما الأعمال بالنيات وإنما لكل امرئ ما نوى",
     "source": "صحيح البخاري وصحيح مسلم",
     "is_active": true,
@@ -354,10 +510,10 @@ Content-Type: application/json
 For imports, download the template first. It contains the required heading row:
 
 ```text
-book_title,hadith_title,hadith_text,narrator_name,source,terms_json,assistance_notes,sort_order,is_active
+book_title,hadith_title,hadith_intro,hadith_text,narrator_name,source,terms_json,assistance_notes,sort_order,is_active
 ```
 
-`terms_json` is an array such as `[ {"term":"النيات","explanation":"المقاصد التي يقصدها الإنسان بعمله."} ]`. The import response reports `import_id`, `status`, `total_rows`, `imported_rows`, `failed_rows`, and row-level `errors`; a partial upload returns `201` with `status: "completed_with_errors"`.
+`hadith_intro` is optional and holds مقدمة الحديث. `terms_json` is an array such as `[ {"term":"النيات","explanation":"المقاصد التي يقصدها الإنسان بعمله."} ]`. The import response reports `import_id`, `status`, `total_rows`, `imported_rows`, `failed_rows`, and row-level `errors`; a partial upload returns `201` with `status: "completed_with_errors"`.
 
 ## Operational notes
 

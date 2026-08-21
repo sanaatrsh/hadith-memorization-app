@@ -31,9 +31,9 @@ class HadithController extends Controller
 
         $hadith->load(['book', 'narrator', 'terms', 'aids']);
 
-        // Attach the current user's progress when authenticated.
+        // Attach the current user's progress and stack membership when authenticated.
         if (auth('sanctum')->check()) {
-            $hadith->load('currentUserProgress');
+            $hadith->load(['currentUserProgress', 'currentUserStackItem']);
         }
 
         return ApiResponse::success(new HadithResource($hadith), 'Hadith retrieved successfully.');

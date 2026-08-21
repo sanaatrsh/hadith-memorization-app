@@ -50,4 +50,9 @@ class User extends Authenticatable
     {
         return $this->hasMany(UserHadithProgress::class);
     }
+
+    public function memorizationStack(): HasMany
+    {
+        return $this->hasMany(MemorizationStackItem::class);
+    }
 }

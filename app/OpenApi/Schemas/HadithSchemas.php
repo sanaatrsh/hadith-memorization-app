@@ -56,6 +56,7 @@ use OpenApi\Attributes as OA;
         new OA\Property(property: 'book_id', type: 'integer', example: 2),
         new OA\Property(property: 'narrator_id', type: 'integer', nullable: true, example: 3),
         new OA\Property(property: 'title', type: 'string', example: 'إنما الأعمال بالنيات'),
+        new OA\Property(property: 'intro', description: 'مقدمة الحديث — the isnad/context line the hadith opens with.', type: 'string', nullable: true, example: 'عن عمر بن الخطاب رضي الله عنه قال'),
         new OA\Property(property: 'text', type: 'string', example: 'إنما الأعمال بالنيات وإنما لكل امرئ ما نوى'),
         new OA\Property(property: 'source', type: 'string', nullable: true, example: 'صحيح البخاري'),
         new OA\Property(property: 'is_active', type: 'boolean', example: true),
@@ -66,6 +67,8 @@ use OpenApi\Attributes as OA;
         new OA\Property(property: 'terms', type: 'array', items: new OA\Items(ref: '#/components/schemas/HadithTerm')),
         new OA\Property(property: 'aids', type: 'array', items: new OA\Items(ref: '#/components/schemas/HadithAid')),
         new OA\Property(property: 'progress', ref: '#/components/schemas/UserProgress', nullable: true),
+        new OA\Property(property: 'on_memorization_stack', description: 'Present when authenticated: the hadith sits on the memorization stack.', type: 'boolean', nullable: true, example: true),
+        new OA\Property(property: 'stack_source', type: 'string', enum: ['user', 'evaluation', 'ai'], nullable: true, example: 'user'),
     ],
     type: 'object',
 )]

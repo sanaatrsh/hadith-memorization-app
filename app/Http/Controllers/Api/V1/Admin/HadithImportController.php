@@ -14,7 +14,7 @@ use Symfony\Component\HttpFoundation\StreamedResponse;
 class HadithImportController extends Controller
 {
     private const TEMPLATE_COLUMNS = [
-        'book_title', 'hadith_title', 'hadith_text', 'narrator_name',
+        'book_title', 'hadith_title', 'hadith_intro', 'hadith_text', 'narrator_name',
         'source', 'terms_json', 'assistance_notes', 'sort_order', 'is_active',
     ];
 

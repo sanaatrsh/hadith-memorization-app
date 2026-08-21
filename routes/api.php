@@ -19,6 +19,7 @@ use App\Http\Controllers\Api\V1\ReviewAttemptController;
 use App\Http\Controllers\Api\V1\SystemController;
 use App\Http\Controllers\Api\V1\User\BookSelectionController;
 use App\Http\Controllers\Api\V1\User\DashboardController;
+use App\Http\Controllers\Api\V1\User\MemorizationStackController;
 use App\Http\Controllers\Api\V1\User\ReviewController;
 use Illuminate\Support\Facades\Route;
 
@@ -68,6 +69,12 @@ Route::prefix('v1')->group(function () {
         Route::delete('/books/{book}', [BookSelectionController::class, 'destroy']);
         Route::get('/progress', [DashboardController::class, 'show']);
         Route::get('/reviews/due', [ReviewController::class, 'due']);
+
+        // Memorization stack: what to memorize next, and pushing a hadith back
+        // onto the top of it.
+        Route::get('/memorization/stack', [MemorizationStackController::class, 'index']);
+        Route::post('/memorization/stack', [MemorizationStackController::class, 'store']);
+        Route::delete('/memorization/stack/{hadith}', [MemorizationStackController::class, 'destroy']);
     });
 
     // --- Memorization & review evaluation (rate limited) ---

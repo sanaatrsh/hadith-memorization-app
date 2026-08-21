@@ -8,6 +8,14 @@ Arabic word-comparison (the authoritative score) and uses **Gemini** for
 structured Arabic feedback only. A simple spaced-repetition schedule, written &
 voice exams, CSV/Excel import, and admin statistics are included.
 
+The whole book catalogue is readable by every user; adding a book to the
+learning list is what starts memorization (التسميع). What to memorize next comes
+from a **stack**: hadiths the user asks to review — or that the evaluator and
+Gemini flag — sit on top, then reviews that are due, then the untouched hadiths
+of the most recently added book. Exams cover a whole book (one question per
+hadith) and release every result, including the correct answers, only once all
+the questions are done.
+
 ## Stack
 
 - Laravel 13, PHP 8.3+
@@ -59,6 +67,7 @@ app/
   Services/HadithTextComparisonService.php               # authoritative scoring
   Services/SpacedRepetitionService.php
   Services/ExamAnswerEvaluator.php
+  Services/MemorizationStackService.php                   # the memorization queue (stack)
   Enums/                                                 # finite states
   Http/Controllers/Api/V1/                               # thin controllers
 config/athar.php                                         # scoring, normalization, SRS

@@ -8,16 +8,22 @@ use App\Models\Exam;
 use App\Models\Hadith;
 use App\Models\QuestionTemplate;
 use App\Models\User;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 
 /**
  * Builds an exam from stored question templates and the selected book's
  * content only. Gemini is never used to invent questions.
+ *
+ * The exam covers the whole book: every active hadith gets exactly one
+ * question, in the book's own order, and the question templates rotate so the
+ * types stay varied. Passing a question count only narrows the exam to a
+ * subset of the hadiths — a hadith is never asked about twice.
  */
 class GenerateExam
 {
-    public function execute(User $user, Book $book, int $questionCount): Exam
+    public function execute(User $user, Book $book, ?int $questionCount = null): Exam
     {
         $templates = QuestionTemplate::where('is_active', true)->get();
 
@@ -26,32 +32,37 @@ class GenerateExam
         $hadiths = $book->hadiths()
             ->where('is_active', true)
             ->with('narrator')
+            ->orderBy('sort_order')
+            ->orderBy('id')
             ->get();
 
         abort_if($hadiths->isEmpty(), 422, 'The selected book has no active hadiths.');
 
-        return DB::transaction(function () use ($user, $book, $questionCount, $templates, $hadiths) {
+        $hadiths = $this->selectHadiths($hadiths, $questionCount);
+
+        // Rotating a shuffled template list keeps every type in play while
+        // still giving each hadith exactly one question.
+        $templates = $templates->shuffle()->values();
+
+        return DB::transaction(function () use ($user, $book, $templates, $hadiths) {
             $exam = Exam::create([
                 'user_id' => $user->id,
                 'book_id' => $book->id,
-                'question_count' => $questionCount,
+                'question_count' => $hadiths->count(),
                 'status' => 'in_progress',
                 'started_at' => now(),
             ]);
 
-            for ($i = 0; $i < $questionCount; $i++) {
-                /** @var Hadith $hadith */
-                $hadith = $hadiths->random();
-                /** @var QuestionTemplate $template */
-                $template = $templates->random();
+            foreach ($hadiths->values() as $index => $hadith) {
+                $template = $this->templateFor($templates, $hadith, $index);
 
                 $exam->questions()->create([
                     'hadith_id' => $hadith->id,
                     'question_template_id' => $template->id,
                     'type' => $template->type,
                     'question_text' => $this->renderPrompt($template->prompt_template, $hadith),
-                    'correct_answer' => $this->deriveAnswer($template, $hadith),
-                    'sort_order' => $i,
+                    'correct_answer' => $this->deriveAnswer($template, $hadith) ?: $hadith->text,
+                    'sort_order' => $index,
                 ]);
             }
 
@@ -61,12 +72,56 @@ class GenerateExam
         });
     }
 
+    /**
+     * The rotating template for this position, skipped forward while it would
+     * ask about something this hadith does not carry (no narrator, no takhrij,
+     * no intro) so a question is never unanswerable.
+     *
+     * @param  Collection<int,QuestionTemplate>  $templates
+     */
+    private function templateFor(Collection $templates, Hadith $hadith, int $index): QuestionTemplate
+    {
+        $count = $templates->count();
+
+        for ($offset = 0; $offset < $count; $offset++) {
+            /** @var QuestionTemplate $candidate */
+            $candidate = $templates[($index + $offset) % $count];
+
+            if ($this->deriveAnswer($candidate, $hadith) !== '') {
+                return $candidate;
+            }
+        }
+
+        return $templates[$index % $count];
+    }
+
+    /**
+     * All the book's hadiths by default; a requested count narrows it to that
+     * many distinct hadiths, kept in the book's order.
+     *
+     * @param  Collection<int,Hadith>  $hadiths
+     * @return Collection<int,Hadith>
+     */
+    private function selectHadiths(Collection $hadiths, ?int $questionCount): Collection
+    {
+        if ($questionCount === null || $questionCount >= $hadiths->count()) {
+            return $hadiths;
+        }
+
+        return $hadiths
+            ->shuffle()
+            ->take($questionCount)
+            ->sortBy([['sort_order', 'asc'], ['id', 'asc']])
+            ->values();
+    }
+
     private function renderPrompt(string $template, Hadith $hadith): string
     {
         return strtr($template, [
             '{title}' => $hadith->title,
             '{source}' => (string) $hadith->source,
             '{narrator}' => (string) $hadith->narrator?->name,
+            '{intro}' => (string) $hadith->intro,
             '{opening}' => Str::words($hadith->text, 5, '…'),
         ]);
     }
@@ -83,8 +138,12 @@ class GenerateExam
             return (string) $hadith->narrator?->name;
         }
 
-        if (Str::contains($prompt, ['مصدر', 'المصدر', 'source'])) {
+        if (Str::contains($prompt, ['مصدر', 'المصدر', 'مخرج', 'التخريج', 'source'])) {
             return (string) $hadith->source;
+        }
+
+        if (Str::contains($prompt, ['مقدمة', 'مقدم', 'intro'])) {
+            return (string) $hadith->intro;
         }
 
         // Complete-the-hadith and similar recall questions.

@@ -27,6 +27,7 @@ class SwaggerEndpointCoverageTest extends TestCase
             '/memorization/attempts',
             '/reviews/{hadith}/attempts',
             '/user/reviews/due',
+            '/user/memorization/stack',
             '/exams',
             '/admin/books',
             '/admin/hadiths',

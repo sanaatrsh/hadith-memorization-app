@@ -77,4 +77,51 @@ use OpenApi\Attributes as OA;
     ],
     type: 'object',
 )]
+#[OA\Schema(
+    schema: 'MemorizationQueueItem',
+    description: 'One entry of the memorization stack: what to memorize, and why it is at this position.',
+    properties: [
+        new OA\Property(property: 'position', description: '1 is the top of the stack.', type: 'integer', example: 1),
+        new OA\Property(
+            property: 'queue_reason',
+            description: 'pushed = put back on the stack by the user, Gemini, or the evaluator; due_review = the spaced-repetition date has arrived; new = not memorized yet.',
+            type: 'string',
+            enum: ['pushed', 'due_review', 'new'],
+            example: 'pushed',
+        ),
+        new OA\Property(property: 'source', description: 'Who pushed it (pushed entries only).', type: 'string', enum: ['user', 'evaluation', 'ai'], nullable: true, example: 'user'),
+        new OA\Property(property: 'reason', type: 'string', nullable: true, example: 'درجة التسميع أقل من الحد المطلوب، الحديث بحاجة إلى مراجعة.'),
+        new OA\Property(property: 'pushed_at', type: 'string', format: 'date-time', nullable: true),
+        new OA\Property(property: 'hadith', ref: '#/components/schemas/Hadith'),
+        new OA\Property(property: 'progress', ref: '#/components/schemas/UserProgress', nullable: true),
+    ],
+    type: 'object',
+)]
+#[OA\Schema(
+    schema: 'PushMemorizationStackRequest',
+    required: ['hadith_id'],
+    properties: [
+        new OA\Property(property: 'hadith_id', type: 'integer', example: 18),
+        new OA\Property(property: 'reason', type: 'string', maxLength: 500, nullable: true, example: 'أحتاج مراجعة هذا الحديث.'),
+    ],
+    type: 'object',
+)]
+#[OA\Schema(
+    schema: 'MemorizationStackItemResponse',
+    properties: [
+        new OA\Property(property: 'success', type: 'boolean', example: true),
+        new OA\Property(property: 'message', type: 'string', example: 'تمت إضافة الحديث إلى قائمة المراجعة.'),
+        new OA\Property(
+            property: 'data',
+            properties: [
+                new OA\Property(property: 'hadith_id', type: 'integer', example: 18),
+                new OA\Property(property: 'source', type: 'string', enum: ['user', 'evaluation', 'ai'], example: 'user'),
+                new OA\Property(property: 'reason', type: 'string', nullable: true),
+                new OA\Property(property: 'pushed_at', type: 'string', format: 'date-time'),
+            ],
+            type: 'object',
+        ),
+    ],
+    type: 'object',
+)]
 final class MemorizationSchemas {}

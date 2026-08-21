@@ -16,6 +16,8 @@ class HadithResource extends JsonResource
             'book_id' => $this->book_id,
             'narrator_id' => $this->narrator_id,
             'title' => $this->title,
+            // The isnad/context line the hadith opens with (مقدمة الحديث).
+            'intro' => $this->intro,
             'text' => $this->text,
             'source' => $this->source,
             'is_active' => $this->is_active,
@@ -28,6 +30,12 @@ class HadithResource extends JsonResource
             'aids' => HadithAidResource::collection($this->whenLoaded('aids')),
             // Current authenticated-user progress is attached in Phase 3.
             'progress' => $this->whenLoaded('currentUserProgress', fn () => new UserHadithProgressResource($this->currentUserProgress)),
+            // Whether the hadith is sitting on the user's memorization stack.
+            'on_memorization_stack' => $this->when(
+                $this->resource->relationLoaded('currentUserStackItem'),
+                fn () => $this->currentUserStackItem !== null,
+            ),
+            'stack_source' => $this->whenLoaded('currentUserStackItem', fn () => $this->currentUserStackItem?->source->value),
             'created_at' => $this->created_at,
             'updated_at' => $this->updated_at,
         ];

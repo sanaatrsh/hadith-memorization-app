@@ -52,6 +52,7 @@ class NawawiFortySeeder extends Seeder
                 ['book_id' => $book->id, 'title' => $entry['title']],
                 [
                     'narrator_id' => $narrator->id,
+                    'intro' => $entry['intro'] ?? null,
                     'text' => $entry['text'],
                     'source' => $entry['source'],
                     'is_active' => true,

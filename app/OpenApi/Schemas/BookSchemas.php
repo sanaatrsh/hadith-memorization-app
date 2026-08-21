@@ -16,6 +16,9 @@ use OpenApi\Attributes as OA;
         new OA\Property(property: 'sort_order', type: 'integer', example: 1),
         new OA\Property(property: 'cover_url', type: 'string', nullable: true, example: 'http://localhost/storage/2/cover.jpg'),
         new OA\Property(property: 'hadiths_count', type: 'integer', nullable: true, example: 40),
+        new OA\Property(property: 'is_added', description: 'Present when authenticated: the book is in the learning list. Every active book is readable regardless.', type: 'boolean', nullable: true, example: false),
+        new OA\Property(property: 'added_at', type: 'string', format: 'date-time', nullable: true),
+        new OA\Property(property: 'memorized_count', description: 'Present when authenticated: hadiths of this book the user has memorized.', type: 'integer', nullable: true, example: 12),
     ],
     type: 'object',
 )]

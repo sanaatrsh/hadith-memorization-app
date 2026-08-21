@@ -3,19 +3,23 @@
 namespace App\Actions\Memorization;
 
 use App\Contracts\Ai\HadithEvaluator;
+use App\Data\Ai\HadithEvaluationData;
 use App\Enums\AttemptStatus;
 use App\Enums\AttemptType;
 use App\Enums\EvaluationVerdict;
+use App\Enums\StackSource;
 use App\Models\Hadith;
 use App\Models\MemorizationAttempt;
 use App\Models\User;
 use App\Models\UserHadithProgress;
 use App\Services\ArabicTextNormalizer;
 use App\Services\HadithTextComparisonService;
+use App\Services\MemorizationStackService;
 use App\Services\SpacedRepetitionService;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Str;
 
 /**
  * Core evaluation workflow, reused by memorization, review, and voice-exam
@@ -29,6 +33,7 @@ class EvaluateMemorizationAttempt
         private readonly HadithTextComparisonService $comparison,
         private readonly HadithEvaluator $evaluator,
         private readonly SpacedRepetitionService $srs,
+        private readonly MemorizationStackService $stack,
     ) {}
 
     public function execute(
@@ -106,6 +111,7 @@ class EvaluateMemorizationAttempt
             $attempt->save();
 
             $this->updateProgress($user, $hadith, $finalScore);
+            $this->syncStack($user, $hadith, $finalScore, $ai);
 
             // Structured, secret-free observability.
             Log::info('memorization.attempt.evaluated', [
@@ -120,6 +126,37 @@ class EvaluateMemorizationAttempt
 
             return $attempt;
         });
+    }
+
+    /**
+     * Keep the memorization stack in step with the attempt: a recitation below
+     * the passing score puts the hadith back on the stack, and so does a Gemini
+     * recommendation to repeat or review it. A clean pass pops it off.
+     */
+    private function syncStack(User $user, Hadith $hadith, int $finalScore, HadithEvaluationData $ai): void
+    {
+        $passing = (int) config('athar.scoring.passing');
+
+        $aiWantsReview = $ai->available && (
+            in_array($ai->recommendedAction, ['repeat_now', 'review_later'], true)
+            || in_array($ai->verdict, [EvaluationVerdict::NeedsReview, EvaluationVerdict::Incorrect], true)
+        );
+
+        if ($finalScore >= $passing && ! $aiWantsReview) {
+            $this->stack->resolve($user, $hadith);
+
+            return;
+        }
+
+        $this->stack->push(
+            user: $user,
+            hadith: $hadith,
+            source: $aiWantsReview ? StackSource::Ai : StackSource::Evaluation,
+            reason: $aiWantsReview && $ai->feedbackAr !== null
+                ? Str::limit($ai->feedbackAr, 500)
+                : 'درجة التسميع أقل من الحد المطلوب، الحديث بحاجة إلى مراجعة.',
+            triggerScore: $finalScore,
+        );
     }
 
     private function updateProgress(User $user, Hadith $hadith, int $finalScore): UserHadithProgress

@@ -11,7 +11,6 @@ use App\Models\Book;
 use App\Models\Exam;
 use App\Models\ExamAnswer;
 use App\Models\ExamQuestion;
-use App\Models\UserBook;
 use App\Services\ExamAnswerEvaluator;
 use App\Support\ApiResponse;
 use Illuminate\Http\Request;
@@ -61,21 +60,24 @@ class ExamController extends Controller
                 new OA\Property(property: 'data', ref: '#/components/schemas/Exam'),
             ], type: 'object')),
             new OA\Response(response: 401, description: 'Unauthenticated.', content: new OA\JsonContent(ref: '#/components/schemas/UnauthenticatedError')),
-            new OA\Response(response: 403, description: 'Book not selected by the user.', content: new OA\JsonContent(ref: '#/components/schemas/ForbiddenError')),
+            new OA\Response(response: 404, description: 'Book not found or inactive.', content: new OA\JsonContent(ref: '#/components/schemas/NotFoundError')),
             new OA\Response(response: 422, description: 'Validation failed / no templates or hadiths.', content: new OA\JsonContent(ref: '#/components/schemas/ValidationError')),
         ],
     )]
     public function store(StoreExamRequest $request, GenerateExam $action)
     {
         $user = $request->user();
+
+        // Every user has the whole catalogue: an exam can be taken on any
+        // active book, whether or not it is in the learning list.
         $book = Book::where('is_active', true)->findOrFail($request->integer('book_id'));
 
-        $ownsBook = UserBook::where('user_id', $user->id)->where('book_id', $book->id)->exists();
-        if (! $ownsBook) {
-            return ApiResponse::error('You have not selected this book.', 403);
-        }
+        // No count given means: every hadith in the book.
+        $questionCount = $request->filled('question_count')
+            ? $request->integer('question_count')
+            : null;
 
-        $exam = $action->execute($user, $book, $request->integer('question_count'));
+        $exam = $action->execute($user, $book, $questionCount);
 
         return ApiResponse::success(new ExamResource($exam), 'Exam created successfully.', 201);
     }
@@ -84,7 +86,7 @@ class ExamController extends Controller
         path: '/exams/{exam}',
         operationId: 'showExam',
         summary: 'Get an exam with its questions',
-        description: 'Correct answers are hidden. Each question includes the submitted answer when present.',
+        description: 'While the exam is in progress each question only shows whether it has been answered. Once the exam is completed the same endpoint returns the score, the per-question result, and the correct answer for every question.',
         tags: ['Exams'],
         security: [['sanctum' => []]],
         parameters: [new OA\Parameter(name: 'exam', in: 'path', required: true, schema: new OA\Schema(type: 'integer'))],
@@ -102,7 +104,7 @@ class ExamController extends Controller
     {
         $this->authorizeExam($exam);
 
-        $exam->load(['questions.answer']);
+        $exam->load(['questions.answer', 'book']);
 
         return ApiResponse::success(new ExamResource($exam), 'Exam retrieved successfully.');
     }
@@ -111,13 +113,13 @@ class ExamController extends Controller
         path: '/exams/{exam}/answers',
         operationId: 'submitExamAnswer',
         summary: 'Submit an answer to an exam question',
-        description: 'Written factual answers are exact-matched after Arabic normalization; recall and voice recitation answers reuse the deterministic transcript comparison. Rate limited to 30 requests/minute.',
+        description: 'The answer is evaluated and stored, but the result is withheld: scores and correct answers are released only when the exam is completed. Written factual answers are exact-matched after Arabic normalization; recall and voice recitation answers reuse the deterministic transcript comparison. Rate limited to 30 requests/minute.',
         tags: ['Exams'],
         security: [['sanctum' => []]],
         parameters: [new OA\Parameter(name: 'exam', in: 'path', required: true, schema: new OA\Schema(type: 'integer'))],
         requestBody: new OA\RequestBody(required: true, content: new OA\JsonContent(ref: '#/components/schemas/StoreExamAnswerRequest')),
         responses: [
-            new OA\Response(response: 200, description: 'Answer evaluated.', content: new OA\JsonContent(ref: '#/components/schemas/ExamAnswerResult')),
+            new OA\Response(response: 200, description: 'Answer received (result withheld until completion).', content: new OA\JsonContent(ref: '#/components/schemas/ExamAnswerResult')),
             new OA\Response(response: 401, description: 'Unauthenticated.', content: new OA\JsonContent(ref: '#/components/schemas/UnauthenticatedError')),
             new OA\Response(response: 403, description: 'Exam belongs to another user.', content: new OA\JsonContent(ref: '#/components/schemas/ForbiddenError')),
             new OA\Response(response: 422, description: 'Exam already completed / validation failed.', content: new OA\JsonContent(ref: '#/components/schemas/ValidationError')),
@@ -134,7 +136,7 @@ class ExamController extends Controller
 
         $result = $evaluator->evaluate($question, (string) $request->input('answer_text'));
 
-        $answer = ExamAnswer::updateOrCreate(
+        ExamAnswer::updateOrCreate(
             ['exam_question_id' => $question->id],
             [
                 'answer_text' => $request->input('answer_text'),
@@ -144,19 +146,26 @@ class ExamController extends Controller
             ]
         );
 
+        // The score is stored but not disclosed: the learner sees every result
+        // at once after finishing the whole exam.
+        $questionIds = $exam->questions()->pluck('id');
+        $answeredCount = ExamAnswer::whereIn('exam_question_id', $questionIds)->count();
+
         return ApiResponse::success([
             'exam_question_id' => $question->id,
-            'score' => $answer->score,
-            'is_correct' => $answer->is_correct,
-            'evaluation_report' => $answer->evaluation_report,
-        ], 'Answer submitted successfully.');
+            'is_answered' => true,
+            'answered_count' => $answeredCount,
+            'total_questions' => $questionIds->count(),
+            'remaining_count' => max($questionIds->count() - $answeredCount, 0),
+            'results_released' => false,
+        ], 'تم استلام الإجابة. تظهر النتيجة بعد إنهاء جميع الأسئلة.');
     }
 
     #[OA\Post(
         path: '/exams/{exam}/complete',
         operationId: 'completeExam',
         summary: 'Complete an exam and compute the final score',
-        description: 'Finalizes the exam; the score is the average of all answer scores.',
+        description: 'Finalizes the exam and releases the results: the overall score (the average over all questions, unanswered ones counting as zero) plus, for every question, its score and the correct answer.',
         tags: ['Exams'],
         security: [['sanctum' => []]],
         parameters: [new OA\Parameter(name: 'exam', in: 'path', required: true, schema: new OA\Schema(type: 'integer'))],
@@ -176,8 +185,13 @@ class ExamController extends Controller
 
         abort_unless($exam->status === 'in_progress', 422, 'This exam is already completed.');
 
-        $scores = ExamAnswer::whereIn('exam_question_id', $exam->questions()->pluck('id'))->pluck('score');
-        $finalScore = $scores->isEmpty() ? 0 : (int) round($scores->avg());
+        $questionIds = $exam->questions()->pluck('id');
+        $scores = ExamAnswer::whereIn('exam_question_id', $questionIds)->pluck('score');
+
+        // Unanswered questions count as zero so the score always reflects the
+        // whole exam.
+        $totalQuestions = max($questionIds->count(), 1);
+        $finalScore = (int) round($scores->sum() / $totalQuestions);
 
         $exam->update([
             'status' => 'completed',
@@ -185,7 +199,7 @@ class ExamController extends Controller
             'score' => $finalScore,
         ]);
 
-        $exam->load(['questions.answer']);
+        $exam->load(['questions.answer', 'book']);
 
         return ApiResponse::success(new ExamResource($exam), 'Exam completed successfully.');
     }

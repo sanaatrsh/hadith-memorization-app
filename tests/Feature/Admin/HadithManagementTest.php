@@ -30,6 +30,33 @@ class HadithManagementTest extends TestCase
             ->assertJsonPath('data.book_id', $book->id);
     }
 
+    public function test_admin_can_set_and_update_the_hadith_intro(): void
+    {
+        Sanctum::actingAs(User::factory()->admin()->create());
+        $book = Book::factory()->create();
+
+        $hadithId = $this->postJson('/api/v1/admin/hadiths', [
+            'book_id' => $book->id,
+            'title' => 'إنما الأعمال بالنيات',
+            'intro' => 'عن عمر بن الخطاب رضي الله عنه قال',
+            'text' => 'إنما الأعمال بالنيات',
+        ])
+            ->assertCreated()
+            ->assertJsonPath('data.intro', 'عن عمر بن الخطاب رضي الله عنه قال')
+            ->json('data.id');
+
+        $this->patchJson("/api/v1/admin/hadiths/{$hadithId}", [
+            'intro' => 'بينما نحن جلوس عند رسول الله صلى الله عليه وسلم',
+        ])
+            ->assertOk()
+            ->assertJsonPath('data.intro', 'بينما نحن جلوس عند رسول الله صلى الله عليه وسلم');
+
+        $this->assertDatabaseHas('hadiths', [
+            'id' => $hadithId,
+            'intro' => 'بينما نحن جلوس عند رسول الله صلى الله عليه وسلم',
+        ]);
+    }
+
     public function test_admin_can_manage_nested_terms_and_aids(): void
     {
         Sanctum::actingAs(User::factory()->admin()->create());

@@ -18,6 +18,7 @@ class Hadith extends Model implements HasMedia
         'book_id',
         'narrator_id',
         'title',
+        'intro',
         'text',
         'source',
         'is_active',
@@ -65,6 +66,23 @@ class Hadith extends Model implements HasMedia
     {
         return $this->hasOne(UserHadithProgress::class)
             ->where('user_id', auth('sanctum')->id());
+    }
+
+    public function stackItems(): HasMany
+    {
+        return $this->hasMany(MemorizationStackItem::class);
+    }
+
+    /**
+     * The authenticated user's pending stack entry for this hadith, if any.
+     * Load it with ->with('currentUserStackItem') so the API can tell the
+     * client why a hadith is on top of the queue.
+     */
+    public function currentUserStackItem(): HasOne
+    {
+        return $this->hasOne(MemorizationStackItem::class)
+            ->where('user_id', auth('sanctum')->id())
+            ->whereNull('resolved_at');
     }
 
     public function registerMediaCollections(): void

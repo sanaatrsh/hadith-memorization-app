@@ -16,12 +16,12 @@ class ExamTest extends TestCase
 {
     use RefreshDatabase;
 
-    private function setupBookForUser(User $user): Book
+    private function setupBookForUser(User $user, int $hadiths = 3): Book
     {
         $book = Book::factory()->create();
         UserBook::create(['user_id' => $user->id, 'book_id' => $book->id, 'started_at' => now()]);
         $narrator = Narrator::factory()->create(['name' => 'عمر بن الخطاب']);
-        Hadith::factory(3)->create([
+        Hadith::factory($hadiths)->create([
             'book_id' => $book->id,
             'narrator_id' => $narrator->id,
             'text' => 'انما الاعمال بالنيات',
@@ -55,19 +55,69 @@ class ExamTest extends TestCase
         $this->assertArrayNotHasKey('questions', $response->json('data.0'));
     }
 
-    public function test_exam_generation_uses_only_stored_templates_and_book_content(): void
+    public function test_it_asks_about_every_hadith_of_the_book_exactly_once(): void
     {
         Sanctum::actingAs($user = User::factory()->create());
-        $book = $this->setupBookForUser($user);
+        $book = $this->setupBookForUser($user, hadiths: 4);
         QuestionTemplate::factory()->create();
+        QuestionTemplate::factory()->narrator()->create();
 
-        $this->postJson('/api/v1/exams', ['book_id' => $book->id, 'question_count' => 5])
+        // No question_count: the exam covers the whole book.
+        $response = $this->postJson('/api/v1/exams', ['book_id' => $book->id])
             ->assertCreated()
             ->assertJsonPath('data.status', 'in_progress')
-            ->assertJsonPath('data.question_count', 5)
-            ->assertJsonCount(5, 'data.questions');
+            ->assertJsonPath('data.question_count', 4)
+            ->assertJsonCount(4, 'data.questions');
 
-        $this->assertDatabaseCount('exam_questions', 5);
+        $hadithIds = collect($response->json('data.questions'))->pluck('hadith_id');
+
+        $this->assertCount(4, $hadithIds->unique(), 'Every hadith must be asked about exactly once.');
+        $this->assertEqualsCanonicalizing(
+            $book->hadiths()->pluck('id')->all(),
+            $hadithIds->all(),
+        );
+    }
+
+    public function test_a_question_count_narrows_the_exam_without_repeating_a_hadith(): void
+    {
+        Sanctum::actingAs($user = User::factory()->create());
+        $book = $this->setupBookForUser($user, hadiths: 5);
+        QuestionTemplate::factory()->create();
+
+        $response = $this->postJson('/api/v1/exams', ['book_id' => $book->id, 'question_count' => 3])
+            ->assertCreated()
+            ->assertJsonPath('data.question_count', 3)
+            ->assertJsonCount(3, 'data.questions');
+
+        $hadithIds = collect($response->json('data.questions'))->pluck('hadith_id');
+
+        $this->assertCount(3, $hadithIds->unique());
+    }
+
+    public function test_a_count_larger_than_the_book_is_capped_at_its_hadiths(): void
+    {
+        Sanctum::actingAs($user = User::factory()->create());
+        $book = $this->setupBookForUser($user, hadiths: 3);
+        QuestionTemplate::factory()->create();
+
+        $this->postJson('/api/v1/exams', ['book_id' => $book->id, 'question_count' => 25])
+            ->assertCreated()
+            ->assertJsonPath('data.question_count', 3)
+            ->assertJsonCount(3, 'data.questions');
+
+        $this->assertDatabaseCount('exam_questions', 3);
+    }
+
+    public function test_an_exam_can_be_taken_on_a_book_that_is_not_in_the_learning_list(): void
+    {
+        Sanctum::actingAs(User::factory()->create());
+        $book = Book::factory()->create();
+        Hadith::factory(2)->create(['book_id' => $book->id, 'text' => 'انما الاعمال بالنيات']);
+        QuestionTemplate::factory()->create();
+
+        $this->postJson('/api/v1/exams', ['book_id' => $book->id])
+            ->assertCreated()
+            ->assertJsonPath('data.question_count', 2);
     }
 
     public function test_exam_generation_fails_without_templates(): void
@@ -79,67 +129,132 @@ class ExamTest extends TestCase
             ->assertStatus(422);
     }
 
-    public function test_written_narrator_answer_is_checked_deterministically(): void
+    public function test_submitting_an_answer_does_not_disclose_its_result(): void
     {
         Sanctum::actingAs($user = User::factory()->create());
-        $book = $this->setupBookForUser($user);
+        $book = $this->setupBookForUser($user, hadiths: 2);
         QuestionTemplate::factory()->narrator()->create();
 
-        $examId = $this->postJson('/api/v1/exams', ['book_id' => $book->id, 'question_count' => 1])
-            ->json('data.id');
+        $examId = $this->postJson('/api/v1/exams', ['book_id' => $book->id])->json('data.id');
         $questionId = $this->getJson("/api/v1/exams/{$examId}")->json('data.questions.0.id');
 
-        $this->postJson("/api/v1/exams/{$examId}/answers", [
+        $response = $this->postJson("/api/v1/exams/{$examId}/answers", [
             'exam_question_id' => $questionId,
             'answer_text' => 'عمر بن الخطاب',
         ])
             ->assertOk()
-            ->assertJsonPath('data.is_correct', true)
-            ->assertJsonPath('data.score', 100);
+            ->assertJsonPath('data.is_answered', true)
+            ->assertJsonPath('data.answered_count', 1)
+            ->assertJsonPath('data.total_questions', 2)
+            ->assertJsonPath('data.remaining_count', 1)
+            ->assertJsonPath('data.results_released', false);
+
+        $this->assertArrayNotHasKey('score', $response->json('data'));
+        $this->assertArrayNotHasKey('is_correct', $response->json('data'));
+
+        // The score is stored even though it is not disclosed yet.
+        $this->assertDatabaseHas('exam_answers', ['exam_question_id' => $questionId, 'score' => 100]);
     }
 
-    public function test_voice_answer_reuses_transcript_comparison(): void
+    public function test_an_exam_in_progress_hides_scores_and_correct_answers(): void
     {
         Sanctum::actingAs($user = User::factory()->create());
-        $book = $this->setupBookForUser($user);
+        $book = $this->setupBookForUser($user, hadiths: 1);
+        QuestionTemplate::factory()->narrator()->create();
+
+        $examId = $this->postJson('/api/v1/exams', ['book_id' => $book->id])->json('data.id');
+        $questionId = $this->getJson("/api/v1/exams/{$examId}")->json('data.questions.0.id');
+
+        $this->postJson("/api/v1/exams/{$examId}/answers", [
+            'exam_question_id' => $questionId,
+            'answer_text' => 'أبو هريرة', // wrong on purpose
+        ])->assertOk();
+
+        $question = $this->getJson("/api/v1/exams/{$examId}")
+            ->assertOk()
+            ->assertJsonPath('data.results_released', false)
+            ->assertJsonPath('data.score', null)
+            ->assertJsonPath('data.questions.0.is_answered', true)
+            ->json('data.questions.0');
+
+        $this->assertArrayNotHasKey('correct_answer', $question);
+        $this->assertArrayNotHasKey('is_correct', $question);
+        $this->assertArrayNotHasKey('score', $question);
+        $this->assertArrayNotHasKey('score', $question['answer']);
+    }
+
+    public function test_completing_the_exam_releases_the_results_with_the_correct_answers(): void
+    {
+        Sanctum::actingAs($user = User::factory()->create());
+        $book = $this->setupBookForUser($user, hadiths: 2);
+        QuestionTemplate::factory()->narrator()->create();
+
+        $examId = $this->postJson('/api/v1/exams', ['book_id' => $book->id])->json('data.id');
+        $questions = $this->getJson("/api/v1/exams/{$examId}")->json('data.questions');
+
+        $this->postJson("/api/v1/exams/{$examId}/answers", [
+            'exam_question_id' => $questions[0]['id'],
+            'answer_text' => 'عمر بن الخطاب', // correct
+        ])->assertOk();
+        $this->postJson("/api/v1/exams/{$examId}/answers", [
+            'exam_question_id' => $questions[1]['id'],
+            'answer_text' => 'أبو هريرة', // wrong
+        ])->assertOk();
+
+        $this->postJson("/api/v1/exams/{$examId}/complete")
+            ->assertOk()
+            ->assertJsonPath('data.status', 'completed')
+            ->assertJsonPath('data.results_released', true)
+            ->assertJsonPath('data.score', 50)
+            ->assertJsonPath('data.summary.correct_count', 1)
+            ->assertJsonPath('data.summary.incorrect_count', 1)
+            ->assertJsonPath('data.summary.unanswered_count', 0)
+            // The correct answer is released for every question, right or wrong.
+            ->assertJsonPath('data.questions.0.is_correct', true)
+            ->assertJsonPath('data.questions.0.correct_answer', 'عمر بن الخطاب')
+            ->assertJsonPath('data.questions.1.is_correct', false)
+            ->assertJsonPath('data.questions.1.correct_answer', 'عمر بن الخطاب')
+            ->assertJsonPath('data.questions.1.score', 0);
+    }
+
+    public function test_voice_answers_reuse_the_transcript_comparison(): void
+    {
+        Sanctum::actingAs($user = User::factory()->create());
+        $book = $this->setupBookForUser($user, hadiths: 1);
         QuestionTemplate::factory()->voice()->create();
 
-        $examId = $this->postJson('/api/v1/exams', ['book_id' => $book->id, 'question_count' => 1])
-            ->json('data.id');
+        $examId = $this->postJson('/api/v1/exams', ['book_id' => $book->id])->json('data.id');
         $questionId = $this->getJson("/api/v1/exams/{$examId}")->json('data.questions.0.id');
 
         $this->postJson("/api/v1/exams/{$examId}/answers", [
             'exam_question_id' => $questionId,
             'answer_text' => 'انما الاعمال بالنيات', // exact recitation
-        ])
-            ->assertOk()
-            ->assertJsonPath('data.score', 100)
-            ->assertJsonPath('data.is_correct', true);
-    }
-
-    public function test_exam_completion_averages_answer_scores(): void
-    {
-        Sanctum::actingAs($user = User::factory()->create());
-        $book = $this->setupBookForUser($user);
-        QuestionTemplate::factory()->voice()->create();
-
-        $examId = $this->postJson('/api/v1/exams', ['book_id' => $book->id, 'question_count' => 2])
-            ->json('data.id');
-        $questions = $this->getJson("/api/v1/exams/{$examId}")->json('data.questions');
-
-        // One perfect, one empty-ish answer.
-        $this->postJson("/api/v1/exams/{$examId}/answers", [
-            'exam_question_id' => $questions[0]['id'],
-            'answer_text' => 'انما الاعمال بالنيات',
-        ])->assertOk();
-        $this->postJson("/api/v1/exams/{$examId}/answers", [
-            'exam_question_id' => $questions[1]['id'],
-            'answer_text' => 'كلمة خاطئة',
         ])->assertOk();
 
         $this->postJson("/api/v1/exams/{$examId}/complete")
             ->assertOk()
-            ->assertJsonPath('data.status', 'completed');
+            ->assertJsonPath('data.score', 100)
+            ->assertJsonPath('data.questions.0.is_correct', true);
+    }
+
+    public function test_unanswered_questions_count_as_zero_in_the_final_score(): void
+    {
+        Sanctum::actingAs($user = User::factory()->create());
+        $book = $this->setupBookForUser($user, hadiths: 2);
+        QuestionTemplate::factory()->voice()->create();
+
+        $examId = $this->postJson('/api/v1/exams', ['book_id' => $book->id])->json('data.id');
+        $questions = $this->getJson("/api/v1/exams/{$examId}")->json('data.questions');
+
+        $this->postJson("/api/v1/exams/{$examId}/answers", [
+            'exam_question_id' => $questions[0]['id'],
+            'answer_text' => 'انما الاعمال بالنيات',
+        ])->assertOk();
+
+        $this->postJson("/api/v1/exams/{$examId}/complete")
+            ->assertOk()
+            ->assertJsonPath('data.score', 50)
+            ->assertJsonPath('data.summary.unanswered_count', 1);
     }
 
     public function test_user_cannot_access_another_users_exam(): void

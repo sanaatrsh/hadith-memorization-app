@@ -18,6 +18,8 @@ class UpdateHadithRequest extends FormRequest
             'narrator_id' => ['nullable', 'integer', 'exists:narrators,id'],
             'title' => ['sometimes', 'required', 'string', 'max:255'],
             'text' => ['sometimes', 'required', 'string'],
+            // مقدمة الحديث: the isnad/context line it opens with.
+            'intro' => ['nullable', 'string', 'max:2000'],
             'source' => ['nullable', 'string', 'max:255'],
             'is_active' => ['sometimes', 'boolean'],
             'sort_order' => ['sometimes', 'integer', 'min:0'],

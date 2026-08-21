@@ -138,15 +138,17 @@ Store the token securely in the client and send it on later requests. A failed p
 
 | Method | Endpoint | Access | Request | Response |
 | --- | --- | --- | --- | --- |
-| GET | `/books?page=1` | Public; token optional | Optional `page`. | Paginated active `Book` resources — the whole catalogue. With a token each book also carries `is_added`, `added_at`, and `memorized_count`. |
-| GET | `/books/{book}` | Public; token optional | Book ID path parameter. | Envelope containing one active `Book` (with `is_added` / `memorized_count` when a token is supplied). |
+| GET | `/books?page=1` | Public; token optional | Optional `page`. | Paginated active `Book` resources — the whole catalogue. With a token each book also carries `is_started`, `progress_count`, and `memorized_count`. |
+| GET | `/books/{book}` | Public; token optional | Book ID path parameter. | Envelope containing one active `Book` (with `is_started` / `progress_count` / `memorized_count` when a token is supplied). |
 | GET | `/books/{book}/hadiths?page=1` | Public | Book ID and optional `page`. | Paginated active `Hadith` resources with narrator. |
 | GET | `/hadiths/{hadith}` | Public; token optional | Hadith ID path parameter. | Envelope containing `intro` (مقدمة الحديث), canonical text, narrator, terms, aids, media URLs, and — with a token — the user's progress and whether the hadith is on their memorization stack. |
 
-Reading is open: every active book and hadith is readable by anyone. Adding a
-book to the learning list (`POST /user/books/{book}/start`) is what starts
-memorization (التسميع) — it is required to recite a hadith of that book or to
-push one onto the memorization stack.
+**There is no per-user book list.** Every active book and hadith is open to
+every user, and nothing has to be "selected" first: any active hadith can be
+recited (`POST /memorization/attempts`) or pushed onto the memorization stack
+straight from the catalogue. A book simply starts counting as one the user works
+in — `is_started`, and `active_books` on the dashboard — as soon as they push one
+of its hadiths or recite one.
 
 `intro` is the isnad/context line a hadith opens with — «عن عمر بن الخطاب رضي
 الله عنه قال» or «بينما نحن جلوس عند رسول الله ﷺ». It is stored apart from
@@ -165,8 +167,8 @@ push one onto the memorization stack.
       "sort_order": 1,
       "cover_url": null,
       "hadiths_count": 2,
-      "is_added": true,
-      "added_at": "2026-07-23T00:00:00.000000Z",
+      "is_started": true,
+      "progress_count": 18,
       "memorized_count": 12,
       "created_at": "2026-07-23T00:00:00.000000Z",
       "updated_at": "2026-07-23T00:00:00.000000Z"
@@ -179,51 +181,19 @@ push one onto the memorization stack.
 
 ## Learning, memorization, and review
 
-All endpoints in this section require an active token. The learner must first
-add a book; adding is idempotent and is required before reciting a hadith of
-that book or pushing one onto the memorization stack. Exams may be taken on any
-active book.
+All endpoints in this section require an active token. Nothing requires picking
+a book first: any active hadith can be recited or pushed onto the stack, and
+exams may be taken on any active book.
 
 | Method | Endpoint | Request body | Response / explanation |
 | --- | --- | --- | --- |
-| GET | `/user/books` | None | Resource collection of selected, unfinished books. |
-| POST | `/user/books/{book}/start` | None | Selected `UserBook` envelope; `201` on first selection and `200` if already selected. |
-| DELETE | `/user/books/{book}` | None | Removes the book selection but preserves attempts and progress. |
-| GET | `/user/progress` | None | Dashboard envelope: active books, total/status counts, due review count, and current empty `recent_attempts` list. |
+| GET | `/user/progress` | None | Dashboard envelope: the books the user is working in, catalogue totals, status counts, `reviews_due_today`, `stack_count`, and the current empty `recent_attempts` list. |
 | GET | `/user/reviews/due?page=1` | Optional `page` | Paginated due `UserProgress` resources. |
-| GET | `/user/memorization/stack?limit=20` | Optional `limit` (1–100, default 20) | The memorization stack: what to memorize next, top first. |
-| POST | `/user/memorization/stack` | `hadith_id`, optional `reason` | Pushes a hadith onto the top of the stack (`201`). Pushing one already on it moves it back to the top instead of duplicating. |
+| GET | `/user/memorization/stack?limit=20&book_id=1` | Optional `limit` (1–100, default 20) and `book_id` | The memorization stack: what to memorize next, top first. `book_id` scopes the queue to one book. |
+| POST | `/user/memorization/stack` | `hadith_id`, optional `reason` | Pushes any active hadith onto the top of the stack (`201`) — no book selection involved. Pushing one already on it moves it back to the top instead of duplicating. |
 | DELETE | `/user/memorization/stack/{hadith}` | None | Pops the hadith off the stack; progress and attempt history are kept. |
 | POST | `/memorization/attempts` | See example below. | Deterministic transcript evaluation, with optional Gemini feedback. 30/min. |
 | POST | `/reviews/{hadith}/attempts` | Same as memorization without `hadith_id`. | Same evaluation, tagged as a review. 30/min. |
-
-### Select a book
-
-```http
-POST /api/v1/user/books/1/start
-Authorization: Bearer <token>
-Accept: application/json
-```
-
-```json
-{
-  "success": true,
-  "message": "Book added to your learning list.",
-  "data": {
-    "id": 1,
-    "book_id": 1,
-    "started_at": "2026-07-23T00:00:00.000000Z",
-    "completed_at": null,
-    "book": {
-      "id": 1,
-      "title": "الأربعون النووية",
-      "is_active": true,
-      "sort_order": 1,
-      "cover_url": null
-    }
-  }
-}
-```
 
 ### The memorization stack
 
@@ -235,15 +205,18 @@ top first:
    (`source: evaluation`) or Gemini (`source: ai`) flagged; within a source the
    newest push is on top.
 2. **Due reviews** — spaced-repetition dates that have arrived, earliest first.
-3. **Not memorized yet** — the most recently added book first, then that book's
-   own order (`sort_order`).
+3. **Not memorized yet** — from the books the user is already working in, the
+   most recently touched first, then that book's own order (`sort_order`).
 
-Layers 2 and 3 only draw on books in the learning list, and memorized hadiths
-drop out until their review comes due.
+A book counts as one the user works in as soon as they push one of its hadiths
+onto the stack or recite one, so the queue stays empty until the user starts
+something instead of dumping the whole catalogue into it. Memorized hadiths drop
+out until their review comes due. Pass `book_id` to get the queue for one
+book — handy while browsing a book the user has not started yet.
 
 Pushes happen three ways:
 
-- The user asks for it: `POST /user/memorization/stack`.
+- The user asks for it: `POST /user/memorization/stack` (any active hadith).
 - The evaluation scores a recitation below `athar.scoring.passing` — the hadith
   is pushed with `source: evaluation`.
 - Gemini recommends `repeat_now` / `review_later`, or returns a

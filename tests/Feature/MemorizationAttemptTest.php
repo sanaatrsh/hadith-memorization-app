@@ -5,7 +5,6 @@ namespace Tests\Feature;
 use App\Models\Book;
 use App\Models\Hadith;
 use App\Models\User;
-use App\Models\UserBook;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\Http;
@@ -19,8 +18,8 @@ class MemorizationAttemptTest extends TestCase
 
     private function makeHadithForUser(User $user, string $text = 'انما الاعمال بالنيات'): Hadith
     {
+        // No book selection is involved: any active hadith can be recited.
         $book = Book::factory()->create();
-        UserBook::create(['user_id' => $user->id, 'book_id' => $book->id, 'started_at' => now()]);
 
         return Hadith::factory()->create(['book_id' => $book->id, 'text' => $text]);
     }
@@ -97,14 +96,31 @@ class MemorizationAttemptTest extends TestCase
         $this->assertDatabaseCount('memorization_attempts', 1);
     }
 
-    public function test_user_without_selected_book_is_forbidden(): void
+    public function test_any_hadith_can_be_recited_without_selecting_its_book(): void
     {
-        Sanctum::actingAs(User::factory()->create());
+        Sanctum::actingAs($user = User::factory()->create());
         $book = Book::factory()->create();
-        $hadith = Hadith::factory()->create(['book_id' => $book->id]);
+        $hadith = Hadith::factory()->create(['book_id' => $book->id, 'text' => 'انما الاعمال بالنيات']);
         $this->fakeValidGemini();
 
-        $this->postJson('/api/v1/memorization/attempts', $this->payload($hadith))->assertStatus(403);
+        $this->postJson('/api/v1/memorization/attempts', $this->payload($hadith))
+            ->assertOk()
+            ->assertJsonPath('data.hadith_id', $hadith->id);
+
+        $this->assertDatabaseCount('user_books', 0);
+        $this->assertDatabaseHas('user_hadith_progress', [
+            'user_id' => $user->id,
+            'hadith_id' => $hadith->id,
+        ]);
+    }
+
+    public function test_an_inactive_hadith_cannot_be_recited(): void
+    {
+        Sanctum::actingAs(User::factory()->create());
+        $hadith = Hadith::factory()->inactive()->create();
+        $this->fakeValidGemini();
+
+        $this->postJson('/api/v1/memorization/attempts', $this->payload($hadith))->assertStatus(422);
     }
 
     public function test_gemini_timeout_falls_back_to_deterministic(): void

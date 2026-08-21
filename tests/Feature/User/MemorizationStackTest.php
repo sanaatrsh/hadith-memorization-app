@@ -7,7 +7,6 @@ use App\Enums\StackSource;
 use App\Models\Book;
 use App\Models\Hadith;
 use App\Models\User;
-use App\Models\UserBook;
 use App\Models\UserHadithProgress;
 use App\Services\MemorizationStackService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -16,17 +15,18 @@ use Illuminate\Support\Str;
 use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
 
+/**
+ * The stack never depends on a book being "selected": every active book is open
+ * to every user, and a book joins the queue as soon as the user pushes a hadith
+ * of it or recites one.
+ */
 class MemorizationStackTest extends TestCase
 {
     use RefreshDatabase;
 
-    /**
-     * @param  array<string,mixed>  $attributes
-     */
-    private function addBook(User $user, array $attributes = [], int $hadiths = 3): Book
+    private function makeBook(int $hadiths = 3): Book
     {
         $book = Book::factory()->create();
-        UserBook::create(['user_id' => $user->id, 'book_id' => $book->id] + $attributes + ['started_at' => now()]);
 
         Hadith::factory($hadiths)
             ->sequence(fn ($sequence) => ['sort_order' => $sequence->index + 1])
@@ -56,56 +56,119 @@ class MemorizationStackTest extends TestCase
         ]);
     }
 
-    public function test_the_stack_starts_with_the_hadiths_of_the_most_recently_added_book(): void
+    public function test_any_active_hadith_can_be_pushed_without_selecting_a_book(): void
     {
-        Sanctum::actingAs($user = User::factory()->create());
+        Sanctum::actingAs(User::factory()->create());
 
-        $older = $this->addBook($user, ['started_at' => now()->subDays(5)], hadiths: 2);
-        $newer = $this->addBook($user, ['started_at' => now()->subMinute()], hadiths: 2);
+        // No learning list, no book selection — just a hadith from the catalogue.
+        $hadith = $this->makeBook(hadiths: 2)->hadiths()->first();
 
-        $response = $this->getJson('/api/v1/user/memorization/stack')
-            ->assertOk()
-            ->assertJsonPath('data.total', 4)
-            ->assertJsonPath('data.items.0.queue_reason', 'new');
-
-        $bookIds = collect($response->json('data.items'))->pluck('hadith.book_id');
-
-        // The book the user just added has priority.
-        $this->assertSame([$newer->id, $newer->id, $older->id, $older->id], $bookIds->all());
-
-        // Inside a book the collection's own order is kept.
-        $sortOrders = collect($response->json('data.items'))->pluck('hadith.sort_order');
-        $this->assertSame([1, 2, 1, 2], $sortOrders->all());
-    }
-
-    public function test_a_user_can_push_a_hadith_onto_the_top_of_the_stack(): void
-    {
-        Sanctum::actingAs($user = User::factory()->create());
-        $book = $this->addBook($user, hadiths: 3);
-        $last = $book->hadiths()->orderByDesc('sort_order')->first();
-
-        $this->postJson('/api/v1/user/memorization/stack', [
-            'hadith_id' => $last->id,
-            'reason' => 'أحتاج مراجعته',
-        ])
+        $this->postJson('/api/v1/user/memorization/stack', ['hadith_id' => $hadith->id])
             ->assertCreated()
-            ->assertJsonPath('data.hadith_id', $last->id)
+            ->assertJsonPath('data.hadith_id', $hadith->id)
             ->assertJsonPath('data.source', 'user');
 
         $this->getJson('/api/v1/user/memorization/stack')
             ->assertOk()
             ->assertJsonPath('data.pushed_count', 1)
-            ->assertJsonPath('data.items.0.hadith.id', $last->id)
+            ->assertJsonPath('data.items.0.hadith.id', $hadith->id);
+
+        $this->assertDatabaseCount('user_books', 0);
+    }
+
+    public function test_an_inactive_hadith_cannot_be_pushed(): void
+    {
+        Sanctum::actingAs(User::factory()->create());
+        $hadith = Hadith::factory()->inactive()->create();
+
+        $this->postJson('/api/v1/user/memorization/stack', ['hadith_id' => $hadith->id])
+            ->assertStatus(422);
+    }
+
+    public function test_the_stack_is_empty_until_the_user_works_on_something(): void
+    {
+        Sanctum::actingAs(User::factory()->create());
+        $this->makeBook(hadiths: 5);
+
+        // The catalogue is not dumped into the queue on its own.
+        $this->getJson('/api/v1/user/memorization/stack')
+            ->assertOk()
+            ->assertJsonPath('data.total', 0)
+            ->assertJsonPath('data.items', []);
+    }
+
+    public function test_pushing_a_hadith_pulls_the_rest_of_its_book_into_the_queue(): void
+    {
+        Sanctum::actingAs(User::factory()->create());
+        $book = $this->makeBook(hadiths: 3);
+        $pushed = $book->hadiths()->orderByDesc('sort_order')->first();
+
+        $this->postJson('/api/v1/user/memorization/stack', ['hadith_id' => $pushed->id])->assertCreated();
+
+        $response = $this->getJson('/api/v1/user/memorization/stack')
+            ->assertOk()
+            ->assertJsonPath('data.total', 3)
+            ->assertJsonPath('data.items.0.hadith.id', $pushed->id)
             ->assertJsonPath('data.items.0.queue_reason', 'pushed')
-            ->assertJsonPath('data.items.0.source', 'user')
-            ->assertJsonPath('data.items.0.reason', 'أحتاج مراجعته')
-            ->assertJsonPath('data.items.0.position', 1);
+            ->assertJsonPath('data.items.1.queue_reason', 'new');
+
+        // The pushed hadith is not repeated further down the queue.
+        $ids = collect($response->json('data.items'))->pluck('hadith.id');
+        $this->assertCount(3, $ids->unique());
+    }
+
+    public function test_the_book_worked_on_most_recently_leads_the_new_hadiths(): void
+    {
+        Sanctum::actingAs(User::factory()->create());
+
+        $first = $this->makeBook(hadiths: 2);
+        $second = $this->makeBook(hadiths: 2);
+
+        $this->postJson('/api/v1/user/memorization/stack', [
+            'hadith_id' => $first->hadiths()->orderBy('sort_order')->first()->id,
+        ])->assertCreated();
+
+        $this->travel(1)->minutes();
+
+        $this->postJson('/api/v1/user/memorization/stack', [
+            'hadith_id' => $second->hadiths()->orderBy('sort_order')->first()->id,
+        ])->assertCreated();
+
+        $response = $this->getJson('/api/v1/user/memorization/stack')->assertOk();
+
+        $newEntries = collect($response->json('data.items'))
+            ->where('queue_reason', 'new')
+            ->values();
+
+        // The book touched last is on top of the untouched hadiths.
+        $this->assertSame($second->id, $newEntries[0]['hadith']['book_id']);
+        $this->assertSame($first->id, $newEntries[1]['hadith']['book_id']);
+    }
+
+    public function test_the_queue_can_be_scoped_to_one_book(): void
+    {
+        Sanctum::actingAs(User::factory()->create());
+
+        $wanted = $this->makeBook(hadiths: 2);
+        $other = $this->makeBook(hadiths: 2);
+
+        $this->postJson('/api/v1/user/memorization/stack', [
+            'hadith_id' => $other->hadiths()->first()->id,
+        ])->assertCreated();
+
+        $response = $this->getJson("/api/v1/user/memorization/stack?book_id={$wanted->id}")
+            ->assertOk()
+            ->assertJsonPath('data.total', 2);
+
+        $bookIds = collect($response->json('data.items'))->pluck('hadith.book_id')->unique();
+
+        $this->assertSame([$wanted->id], $bookIds->values()->all());
     }
 
     public function test_pushing_the_same_hadith_again_moves_it_back_to_the_top_without_duplicating(): void
     {
-        Sanctum::actingAs($user = User::factory()->create());
-        $book = $this->addBook($user, hadiths: 2);
+        Sanctum::actingAs(User::factory()->create());
+        $book = $this->makeBook(hadiths: 2);
         [$first, $second] = $book->hadiths()->orderBy('sort_order')->get()->all();
 
         $this->postJson('/api/v1/user/memorization/stack', ['hadith_id' => $first->id])->assertCreated();
@@ -126,7 +189,7 @@ class MemorizationStackTest extends TestCase
     public function test_user_requests_sit_above_the_ones_the_ai_flagged(): void
     {
         Sanctum::actingAs($user = User::factory()->create());
-        $book = $this->addBook($user, hadiths: 2);
+        $book = $this->makeBook(hadiths: 2);
         [$flagged, $requested] = $book->hadiths()->orderBy('sort_order')->get()->all();
 
         // The evaluator flags one hadith...
@@ -150,22 +213,10 @@ class MemorizationStackTest extends TestCase
             ->assertJsonPath('data.items.1.source', 'ai');
     }
 
-    public function test_pushing_requires_the_book_to_be_in_the_learning_list(): void
-    {
-        Sanctum::actingAs(User::factory()->create());
-
-        $book = Book::factory()->create();
-        $hadith = Hadith::factory()->create(['book_id' => $book->id]);
-
-        $this->postJson('/api/v1/user/memorization/stack', ['hadith_id' => $hadith->id])
-            ->assertStatus(403);
-    }
-
     public function test_a_hadith_can_be_popped_off_the_stack(): void
     {
-        Sanctum::actingAs($user = User::factory()->create());
-        $book = $this->addBook($user, hadiths: 1);
-        $hadith = $book->hadiths()->first();
+        Sanctum::actingAs(User::factory()->create());
+        $hadith = $this->makeBook(hadiths: 1)->hadiths()->first();
 
         $this->postJson('/api/v1/user/memorization/stack', ['hadith_id' => $hadith->id])->assertCreated();
 
@@ -180,7 +231,7 @@ class MemorizationStackTest extends TestCase
     public function test_due_reviews_come_before_hadiths_that_were_never_started(): void
     {
         Sanctum::actingAs($user = User::factory()->create());
-        $book = $this->addBook($user, hadiths: 3);
+        $book = $this->makeBook(hadiths: 3);
         $due = $book->hadiths()->orderByDesc('sort_order')->first();
 
         UserHadithProgress::create([
@@ -194,13 +245,14 @@ class MemorizationStackTest extends TestCase
         $this->getJson('/api/v1/user/memorization/stack')
             ->assertOk()
             ->assertJsonPath('data.items.0.hadith.id', $due->id)
-            ->assertJsonPath('data.items.0.queue_reason', 'due_review');
+            ->assertJsonPath('data.items.0.queue_reason', 'due_review')
+            ->assertJsonPath('data.items.1.queue_reason', 'new');
     }
 
     public function test_memorized_hadiths_leave_the_stack(): void
     {
         Sanctum::actingAs($user = User::factory()->create());
-        $book = $this->addBook($user, hadiths: 2);
+        $book = $this->makeBook(hadiths: 2);
         $memorized = $book->hadiths()->orderBy('sort_order')->first();
 
         UserHadithProgress::create([
@@ -223,8 +275,7 @@ class MemorizationStackTest extends TestCase
     {
         Sanctum::actingAs($user = User::factory()->create());
         $this->fakeGemini();
-        $book = $this->addBook($user, hadiths: 2);
-        $hadith = $book->hadiths()->orderByDesc('sort_order')->first();
+        $hadith = $this->makeBook(hadiths: 2)->hadiths()->orderByDesc('sort_order')->first();
 
         $this->postJson('/api/v1/memorization/attempts', [
             'client_attempt_uuid' => (string) Str::uuid(),
@@ -253,8 +304,7 @@ class MemorizationStackTest extends TestCase
         // Gemini asks for the hadith to be repeated even though the recitation
         // was exact.
         $this->fakeGemini(action: 'repeat_now', verdict: 'needs_review');
-        $book = $this->addBook($user, hadiths: 1);
-        $hadith = $book->hadiths()->first();
+        $hadith = $this->makeBook(hadiths: 1)->hadiths()->first();
 
         $this->postJson('/api/v1/memorization/attempts', [
             'client_attempt_uuid' => (string) Str::uuid(),
@@ -275,8 +325,7 @@ class MemorizationStackTest extends TestCase
     {
         Sanctum::actingAs($user = User::factory()->create());
         $this->fakeGemini();
-        $book = $this->addBook($user, hadiths: 1);
-        $hadith = $book->hadiths()->first();
+        $hadith = $this->makeBook(hadiths: 1)->hadiths()->first();
 
         $this->postJson('/api/v1/user/memorization/stack', ['hadith_id' => $hadith->id])->assertCreated();
 
@@ -297,8 +346,7 @@ class MemorizationStackTest extends TestCase
     public function test_the_stack_is_private_to_each_user(): void
     {
         $owner = User::factory()->create();
-        $book = $this->addBook($owner, hadiths: 1);
-        $hadith = $book->hadiths()->first();
+        $hadith = $this->makeBook(hadiths: 1)->hadiths()->first();
 
         Sanctum::actingAs($owner);
         $this->postJson('/api/v1/user/memorization/stack', ['hadith_id' => $hadith->id])->assertCreated();

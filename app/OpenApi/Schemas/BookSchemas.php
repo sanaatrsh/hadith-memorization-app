@@ -16,8 +16,8 @@ use OpenApi\Attributes as OA;
         new OA\Property(property: 'sort_order', type: 'integer', example: 1),
         new OA\Property(property: 'cover_url', type: 'string', nullable: true, example: 'http://localhost/storage/2/cover.jpg'),
         new OA\Property(property: 'hadiths_count', type: 'integer', nullable: true, example: 40),
-        new OA\Property(property: 'is_added', description: 'Present when authenticated: the book is in the learning list. Every active book is readable regardless.', type: 'boolean', nullable: true, example: false),
-        new OA\Property(property: 'added_at', type: 'string', format: 'date-time', nullable: true),
+        new OA\Property(property: 'is_started', description: 'Present when authenticated: the user has worked on at least one hadith of this book. There is no per-user book list — every active book is open to everyone.', type: 'boolean', nullable: true, example: true),
+        new OA\Property(property: 'progress_count', description: 'Present when authenticated: hadiths of this book the user has a progress record for.', type: 'integer', nullable: true, example: 18),
         new OA\Property(property: 'memorized_count', description: 'Present when authenticated: hadiths of this book the user has memorized.', type: 'integer', nullable: true, example: 12),
     ],
     type: 'object',
@@ -30,17 +30,6 @@ use OpenApi\Attributes as OA;
         new OA\Property(property: 'description', type: 'string', nullable: true, example: 'كتاب في الأحاديث النبوية.'),
         new OA\Property(property: 'is_active', type: 'boolean', example: true),
         new OA\Property(property: 'sort_order', type: 'integer', example: 1),
-    ],
-    type: 'object',
-)]
-#[OA\Schema(
-    schema: 'UserBook',
-    properties: [
-        new OA\Property(property: 'id', type: 'integer', example: 9),
-        new OA\Property(property: 'book_id', type: 'integer', example: 2),
-        new OA\Property(property: 'started_at', type: 'string', format: 'date-time', nullable: true),
-        new OA\Property(property: 'completed_at', type: 'string', format: 'date-time', nullable: true),
-        new OA\Property(property: 'book', ref: '#/components/schemas/Book', nullable: true),
     ],
     type: 'object',
 )]

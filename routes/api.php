@@ -17,7 +17,6 @@ use App\Http\Controllers\Api\V1\HadithController;
 use App\Http\Controllers\Api\V1\MemorizationAttemptController;
 use App\Http\Controllers\Api\V1\ReviewAttemptController;
 use App\Http\Controllers\Api\V1\SystemController;
-use App\Http\Controllers\Api\V1\User\BookSelectionController;
 use App\Http\Controllers\Api\V1\User\DashboardController;
 use App\Http\Controllers\Api\V1\User\MemorizationStackController;
 use App\Http\Controllers\Api\V1\User\ReviewController;
@@ -62,11 +61,10 @@ Route::prefix('v1')->group(function () {
         Route::get('/auth/me', [AuthController::class, 'me']);
     });
 
-    // --- Authenticated user: learning selection & progress ---
+    // --- Authenticated user: progress & memorization stack ---
+    // There is no per-user book list: every active book is open to every user,
+    // and memorizing starts by putting a hadith on the stack or reciting it.
     Route::middleware(['auth:sanctum', 'active'])->prefix('user')->group(function () {
-        // Route::get('/books', [BookSelectionController::class, 'index']);
-        // Route::post('/books/{book}/start', [BookSelectionController::class, 'start']);
-        // Route::delete('/books/{book}', [BookSelectionController::class, 'destroy']);
         Route::get('/progress', [DashboardController::class, 'show']);
         Route::get('/reviews/due', [ReviewController::class, 'due']);
 

@@ -8,7 +8,6 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\StoreReviewAttemptRequest;
 use App\Http\Resources\MemorizationAttemptResource;
 use App\Models\Hadith;
-use App\Models\UserBook;
 use App\Support\ApiResponse;
 use OpenApi\Attributes as OA;
 
@@ -31,7 +30,6 @@ class ReviewAttemptController extends Controller
         responses: [
             new OA\Response(response: 200, description: 'Review evaluated.', content: new OA\JsonContent(ref: '#/components/schemas/MemorizationEvaluationResponse')),
             new OA\Response(response: 401, description: 'Unauthenticated.', content: new OA\JsonContent(ref: '#/components/schemas/UnauthenticatedError')),
-            new OA\Response(response: 403, description: 'The related book is not selected by the user.', content: new OA\JsonContent(ref: '#/components/schemas/ForbiddenError')),
             new OA\Response(response: 422, description: 'Validation failed or hadith inactive.', content: new OA\JsonContent(ref: '#/components/schemas/ValidationError')),
         ],
     )]
@@ -41,14 +39,6 @@ class ReviewAttemptController extends Controller
 
         if (! $hadith->is_active) {
             return ApiResponse::error('This hadith is not available.', 422);
-        }
-
-        $ownsBook = UserBook::where('user_id', $user->id)
-            ->where('book_id', $hadith->book_id)
-            ->exists();
-
-        if (! $ownsBook) {
-            return ApiResponse::error('You have not selected the book this hadith belongs to.', 403);
         }
 
         $hadith->loadMissing('narrator');

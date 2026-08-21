@@ -7,7 +7,6 @@ use App\Models\Hadith;
 use App\Models\Narrator;
 use App\Models\QuestionTemplate;
 use App\Models\User;
-use App\Models\UserBook;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
@@ -16,10 +15,9 @@ class ExamTest extends TestCase
 {
     use RefreshDatabase;
 
-    private function setupBookForUser(User $user, int $hadiths = 3): Book
+    private function setupBook(int $hadiths = 3): Book
     {
         $book = Book::factory()->create();
-        UserBook::create(['user_id' => $user->id, 'book_id' => $book->id, 'started_at' => now()]);
         $narrator = Narrator::factory()->create(['name' => 'عمر بن الخطاب']);
         Hadith::factory($hadiths)->create([
             'book_id' => $book->id,
@@ -34,14 +32,14 @@ class ExamTest extends TestCase
     public function test_it_lists_only_the_authenticated_users_exams_newest_first(): void
     {
         Sanctum::actingAs($user = User::factory()->create());
-        $book = $this->setupBookForUser($user);
+        $book = $this->setupBook();
         QuestionTemplate::factory()->create();
 
         $olderId = $this->postJson('/api/v1/exams', ['book_id' => $book->id, 'question_count' => 1])->json('data.id');
         $newerId = $this->postJson('/api/v1/exams', ['book_id' => $book->id, 'question_count' => 1])->json('data.id');
 
-        $otherBook = $this->setupBookForUser($other = User::factory()->create());
-        Sanctum::actingAs($other);
+        $otherBook = $this->setupBook();
+        Sanctum::actingAs(User::factory()->create());
         $this->postJson('/api/v1/exams', ['book_id' => $otherBook->id, 'question_count' => 1]);
 
         Sanctum::actingAs($user);
@@ -58,7 +56,7 @@ class ExamTest extends TestCase
     public function test_it_asks_about_every_hadith_of_the_book_exactly_once(): void
     {
         Sanctum::actingAs($user = User::factory()->create());
-        $book = $this->setupBookForUser($user, hadiths: 4);
+        $book = $this->setupBook(hadiths: 4);
         QuestionTemplate::factory()->create();
         QuestionTemplate::factory()->narrator()->create();
 
@@ -81,7 +79,7 @@ class ExamTest extends TestCase
     public function test_a_question_count_narrows_the_exam_without_repeating_a_hadith(): void
     {
         Sanctum::actingAs($user = User::factory()->create());
-        $book = $this->setupBookForUser($user, hadiths: 5);
+        $book = $this->setupBook(hadiths: 5);
         QuestionTemplate::factory()->create();
 
         $response = $this->postJson('/api/v1/exams', ['book_id' => $book->id, 'question_count' => 3])
@@ -97,7 +95,7 @@ class ExamTest extends TestCase
     public function test_a_count_larger_than_the_book_is_capped_at_its_hadiths(): void
     {
         Sanctum::actingAs($user = User::factory()->create());
-        $book = $this->setupBookForUser($user, hadiths: 3);
+        $book = $this->setupBook(hadiths: 3);
         QuestionTemplate::factory()->create();
 
         $this->postJson('/api/v1/exams', ['book_id' => $book->id, 'question_count' => 25])
@@ -108,7 +106,7 @@ class ExamTest extends TestCase
         $this->assertDatabaseCount('exam_questions', 3);
     }
 
-    public function test_an_exam_can_be_taken_on_a_book_that_is_not_in_the_learning_list(): void
+    public function test_an_exam_can_be_taken_on_any_active_book(): void
     {
         Sanctum::actingAs(User::factory()->create());
         $book = Book::factory()->create();
@@ -123,7 +121,7 @@ class ExamTest extends TestCase
     public function test_exam_generation_fails_without_templates(): void
     {
         Sanctum::actingAs($user = User::factory()->create());
-        $book = $this->setupBookForUser($user);
+        $book = $this->setupBook();
 
         $this->postJson('/api/v1/exams', ['book_id' => $book->id, 'question_count' => 3])
             ->assertStatus(422);
@@ -132,7 +130,7 @@ class ExamTest extends TestCase
     public function test_submitting_an_answer_does_not_disclose_its_result(): void
     {
         Sanctum::actingAs($user = User::factory()->create());
-        $book = $this->setupBookForUser($user, hadiths: 2);
+        $book = $this->setupBook(hadiths: 2);
         QuestionTemplate::factory()->narrator()->create();
 
         $examId = $this->postJson('/api/v1/exams', ['book_id' => $book->id])->json('data.id');
@@ -159,7 +157,7 @@ class ExamTest extends TestCase
     public function test_an_exam_in_progress_hides_scores_and_correct_answers(): void
     {
         Sanctum::actingAs($user = User::factory()->create());
-        $book = $this->setupBookForUser($user, hadiths: 1);
+        $book = $this->setupBook(hadiths: 1);
         QuestionTemplate::factory()->narrator()->create();
 
         $examId = $this->postJson('/api/v1/exams', ['book_id' => $book->id])->json('data.id');
@@ -186,7 +184,7 @@ class ExamTest extends TestCase
     public function test_completing_the_exam_releases_the_results_with_the_correct_answers(): void
     {
         Sanctum::actingAs($user = User::factory()->create());
-        $book = $this->setupBookForUser($user, hadiths: 2);
+        $book = $this->setupBook(hadiths: 2);
         QuestionTemplate::factory()->narrator()->create();
 
         $examId = $this->postJson('/api/v1/exams', ['book_id' => $book->id])->json('data.id');
@@ -220,7 +218,7 @@ class ExamTest extends TestCase
     public function test_voice_answers_reuse_the_transcript_comparison(): void
     {
         Sanctum::actingAs($user = User::factory()->create());
-        $book = $this->setupBookForUser($user, hadiths: 1);
+        $book = $this->setupBook(hadiths: 1);
         QuestionTemplate::factory()->voice()->create();
 
         $examId = $this->postJson('/api/v1/exams', ['book_id' => $book->id])->json('data.id');
@@ -240,7 +238,7 @@ class ExamTest extends TestCase
     public function test_unanswered_questions_count_as_zero_in_the_final_score(): void
     {
         Sanctum::actingAs($user = User::factory()->create());
-        $book = $this->setupBookForUser($user, hadiths: 2);
+        $book = $this->setupBook(hadiths: 2);
         QuestionTemplate::factory()->voice()->create();
 
         $examId = $this->postJson('/api/v1/exams', ['book_id' => $book->id])->json('data.id');
@@ -260,7 +258,7 @@ class ExamTest extends TestCase
     public function test_user_cannot_access_another_users_exam(): void
     {
         $owner = User::factory()->create();
-        $book = $this->setupBookForUser($owner);
+        $book = $this->setupBook();
         QuestionTemplate::factory()->create();
         Sanctum::actingAs($owner);
         $examId = $this->postJson('/api/v1/exams', ['book_id' => $book->id, 'question_count' => 1])->json('data.id');

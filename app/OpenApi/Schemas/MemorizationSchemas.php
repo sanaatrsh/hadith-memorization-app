@@ -63,13 +63,15 @@ use OpenApi\Attributes as OA;
         new OA\Property(
             property: 'data',
             properties: [
-                new OA\Property(property: 'active_books', type: 'array', items: new OA\Items(ref: '#/components/schemas/Book')),
-                new OA\Property(property: 'total_hadiths', type: 'integer', example: 40),
+                new OA\Property(property: 'active_books', description: 'The books the user is working in — the ones they pushed a hadith of onto the stack or recited from.', type: 'array', items: new OA\Items(ref: '#/components/schemas/Book')),
+                new OA\Property(property: 'total_books', type: 'integer', example: 2),
+                new OA\Property(property: 'total_hadiths', description: 'Active hadiths in the whole catalogue — every user has every book.', type: 'integer', example: 40),
                 new OA\Property(property: 'not_started', type: 'integer', example: 30),
                 new OA\Property(property: 'memorizing', type: 'integer', example: 6),
                 new OA\Property(property: 'reviewing', type: 'integer', example: 3),
                 new OA\Property(property: 'memorized', type: 'integer', example: 1),
                 new OA\Property(property: 'reviews_due_today', type: 'integer', example: 2),
+                new OA\Property(property: 'stack_count', description: 'Hadiths currently pushed onto the memorization stack.', type: 'integer', example: 3),
                 new OA\Property(property: 'recent_attempts', type: 'array', items: new OA\Items(type: 'object')),
             ],
             type: 'object',

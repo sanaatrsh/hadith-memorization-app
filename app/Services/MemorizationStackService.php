@@ -16,14 +16,16 @@ use Illuminate\Support\Collection;
  *
  * The queue is layered, top first:
  *
- *  1. Pushed items (LIFO): hadiths explicitly put back on the stack, the
- *     user's own requests before Gemini's / the evaluator's, newest push first.
+ *  1. Pushed items (LIFO): hadiths explicitly put on the stack, the user's own
+ *     requests before Gemini's / the evaluator's, newest push first.
  *  2. Reviews that are due now, earliest due date first.
- *  3. Hadiths not memorized yet, newest added book first (the book the user
- *     just added has priority), then the book's own order.
+ *  3. Hadiths not memorized yet from the books the user is already working in,
+ *     most recent activity first, then the book's own order.
  *
- * Only books the user added to the learning list feed layers 2 and 3 — reading
- * a book is open to everyone, but memorizing it starts by adding it.
+ * Nothing here depends on a book being "selected": every active book is open to
+ * every user, and a book counts as one the user works in as soon as they push a
+ * hadith of it onto the stack or recite one. Layer 3 can also be scoped to one
+ * book explicitly, so the app can show the queue for a book being browsed.
  */
 class MemorizationStackService
 {
@@ -89,18 +91,13 @@ class MemorizationStackService
     }
 
     /**
-     * The ordered queue of hadiths the user should memorize next.
+     * The ordered queue of hadiths the user should memorize next. Passing a
+     * book narrows every layer to that book.
      *
      * @return Collection<int,array{hadith:Hadith, progress:?UserHadithProgress, stack_item:?MemorizationStackItem, queue_reason:string, position:int}>
      */
-    public function queue(User $user, int $limit = 20): Collection
+    public function queue(User $user, int $limit = 20, ?int $bookId = null): Collection
     {
-        $bookIds = $user->books()
-            ->whereNull('completed_at')
-            ->pluck('book_id');
-
-        $pushed = $this->pushedItems($user);
-
         $progress = UserHadithProgress::where('user_id', $user->id)
             ->get()
             ->keyBy('hadith_id');
@@ -108,7 +105,7 @@ class MemorizationStackService
         $entries = new Collection;
         $seen = [];
 
-        foreach ($pushed as $item) {
+        foreach ($this->pushedItems($user, $bookId) as $item) {
             if ($item->hadith === null || ! $item->hadith->is_active) {
                 continue;
             }
@@ -122,8 +119,8 @@ class MemorizationStackService
             ]);
         }
 
-        if ($bookIds->isNotEmpty() && $entries->count() < $limit) {
-            foreach ($this->dueReviews($user, $bookIds, $seen) as $hadith) {
+        if ($entries->count() < $limit) {
+            foreach ($this->dueReviews($user, $seen, $bookId) as $hadith) {
                 $seen[$hadith->id] = true;
                 $entries->push([
                     'hadith' => $hadith,
@@ -134,10 +131,10 @@ class MemorizationStackService
             }
         }
 
-        if ($bookIds->isNotEmpty() && $entries->count() < $limit) {
+        if ($entries->count() < $limit) {
             $remaining = $limit - $entries->count();
 
-            foreach ($this->unmemorized($user, $remaining, $seen) as $hadith) {
+            foreach ($this->unmemorized($user, $remaining, $seen, $bookId) as $hadith) {
                 $seen[$hadith->id] = true;
                 $entries->push([
                     'hadith' => $hadith,
@@ -159,10 +156,11 @@ class MemorizationStackService
      *
      * @return Collection<int,MemorizationStackItem>
      */
-    public function pushedItems(User $user): Collection
+    public function pushedItems(User $user, ?int $bookId = null): Collection
     {
         return MemorizationStackItem::where('user_id', $user->id)
             ->whereNull('resolved_at')
+            ->when($bookId !== null, fn ($q) => $q->whereHas('hadith', fn ($h) => $h->where('book_id', $bookId)))
             ->with(['hadith' => fn ($q) => $q->with(['book', 'narrator'])])
             ->get()
             ->sortBy([
@@ -174,11 +172,63 @@ class MemorizationStackService
     }
 
     /**
-     * @param  Collection<int,int>  $bookIds
+     * The books the user is working in, most recent activity first: any book
+     * they have pushed a hadith of onto the stack, recited from, or (for
+     * installations that still use the optional learning list) added.
+     *
+     * @return Collection<int,int>
+     */
+    public function engagedBookIds(User $user): Collection
+    {
+        $activity = [];
+
+        $record = function (?int $bookId, mixed $at) use (&$activity): void {
+            if ($bookId === null) {
+                return;
+            }
+
+            $timestamp = $at instanceof Carbon ? $at->getTimestamp() : (int) strtotime((string) $at);
+            $activity[$bookId] = max($activity[$bookId] ?? 0, $timestamp);
+        };
+
+        $progressActivity = UserHadithProgress::query()
+            ->join('hadiths', 'hadiths.id', '=', 'user_hadith_progress.hadith_id')
+            ->where('user_hadith_progress.user_id', $user->id)
+            ->groupBy('hadiths.book_id')
+            ->selectRaw('hadiths.book_id as book_id, MAX(COALESCE(user_hadith_progress.last_attempt_at, user_hadith_progress.updated_at)) as last_activity')
+            ->get();
+
+        foreach ($progressActivity as $row) {
+            $record((int) $row->book_id, $row->last_activity);
+        }
+
+        $stackActivity = MemorizationStackItem::query()
+            ->join('hadiths', 'hadiths.id', '=', 'memorization_stack_items.hadith_id')
+            ->where('memorization_stack_items.user_id', $user->id)
+            ->groupBy('hadiths.book_id')
+            ->selectRaw('hadiths.book_id as book_id, MAX(memorization_stack_items.pushed_at) as last_activity')
+            ->get();
+
+        foreach ($stackActivity as $row) {
+            $record((int) $row->book_id, $row->last_activity);
+        }
+
+        // The learning list is optional now, but when a book is in it that
+        // still counts as working in it.
+        foreach ($user->books()->whereNull('completed_at')->get() as $userBook) {
+            $record($userBook->book_id, $userBook->started_at ?? $userBook->created_at);
+        }
+
+        arsort($activity);
+
+        return new Collection(array_keys($activity));
+    }
+
+    /**
      * @param  array<int,bool>  $seen
      * @return Collection<int,Hadith>
      */
-    private function dueReviews(User $user, $bookIds, array $seen): Collection
+    private function dueReviews(User $user, array $seen, ?int $bookId = null): Collection
     {
         $dueHadithIds = UserHadithProgress::where('user_id', $user->id)
             ->whereNotNull('next_review_at')
@@ -193,8 +243,8 @@ class MemorizationStackService
         }
 
         $hadiths = Hadith::whereIn('id', $dueHadithIds)
-            ->whereIn('book_id', $bookIds)
             ->where('is_active', true)
+            ->when($bookId !== null, fn ($q) => $q->where('book_id', $bookId))
             ->with(['book', 'narrator'])
             ->get()
             ->keyBy('id');
@@ -207,19 +257,17 @@ class MemorizationStackService
     }
 
     /**
-     * Hadiths still to memorize, newest added book first, then book order.
+     * Hadiths still to memorize, from the books the user is working in (or the
+     * requested book), then the book's own order.
      *
      * @param  array<int,bool>  $seen
      * @return Collection<int,Hadith>
      */
-    private function unmemorized(User $user, int $limit, array $seen): Collection
+    private function unmemorized(User $user, int $limit, array $seen, ?int $bookId = null): Collection
     {
-        // The book the user added most recently is on top of the stack.
-        $orderedBookIds = $user->books()
-            ->whereNull('completed_at')
-            ->orderByRaw('COALESCE(started_at, created_at) DESC')
-            ->orderByDesc('id')
-            ->pluck('book_id');
+        $orderedBookIds = $bookId !== null
+            ? new Collection([$bookId])
+            : $this->engagedBookIds($user);
 
         if ($orderedBookIds->isEmpty()) {
             return new Collection;
@@ -234,12 +282,12 @@ class MemorizationStackService
 
         $collected = new Collection;
 
-        foreach ($orderedBookIds as $bookId) {
+        foreach ($orderedBookIds as $id) {
             if ($collected->count() >= $limit) {
                 break;
             }
 
-            $hadiths = Hadith::where('book_id', $bookId)
+            $hadiths = Hadith::where('book_id', $id)
                 ->where('is_active', true)
                 ->when($skip !== [], fn ($q) => $q->whereNotIn('id', $skip))
                 ->with(['book', 'narrator'])

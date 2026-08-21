@@ -29,13 +29,15 @@ class BookController extends Controller
     )]
     public function index()
     {
-        // Every user sees the whole catalogue; `is_added` tells the app which
-        // ones they added to their learning list to memorize.
+        // Every user sees the whole catalogue; the progress counts tell the app
+        // which books this user has already started.
         $books = Book::where('is_active', true)
             ->withCount(['hadiths' => fn ($q) => $q->where('is_active', true)])
             ->when(auth('sanctum')->check(), fn ($q) => $q
-                ->with('currentUserBook')
-                ->withCount(['currentUserProgress as memorized_count' => fn ($p) => $p->where('user_hadith_progress.status', MemorizationStatus::Memorized->value)]))
+                ->withCount([
+                    'currentUserProgress as progress_count',
+                    'currentUserProgress as memorized_count' => fn ($p) => $p->where('user_hadith_progress.status', MemorizationStatus::Memorized->value),
+                ]))
             ->orderBy('sort_order')
             ->orderBy('id')
             ->paginate(20);
@@ -64,8 +66,10 @@ class BookController extends Controller
         $book->loadCount(['hadiths' => fn ($q) => $q->where('is_active', true)]);
 
         if (auth('sanctum')->check()) {
-            $book->load('currentUserBook');
-            $book->loadCount(['currentUserProgress as memorized_count' => fn ($p) => $p->where('user_hadith_progress.status', MemorizationStatus::Memorized->value)]);
+            $book->loadCount([
+                'currentUserProgress as progress_count',
+                'currentUserProgress as memorized_count' => fn ($p) => $p->where('user_hadith_progress.status', MemorizationStatus::Memorized->value),
+            ]);
         }
 
         return ApiResponse::success(new BookResource($book), 'Book retrieved successfully.');

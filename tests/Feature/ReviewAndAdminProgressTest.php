@@ -6,7 +6,6 @@ use App\Enums\MemorizationStatus;
 use App\Models\Book;
 use App\Models\Hadith;
 use App\Models\User;
-use App\Models\UserBook;
 use App\Models\UserHadithProgress;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Http;
@@ -25,7 +24,6 @@ class ReviewAndAdminProgressTest extends TestCase
 
         Sanctum::actingAs($user = User::factory()->create());
         $book = Book::factory()->create();
-        UserBook::create(['user_id' => $user->id, 'book_id' => $book->id, 'started_at' => now()]);
         $hadith = Hadith::factory()->create(['book_id' => $book->id, 'text' => 'انما الاعمال بالنيات']);
 
         $this->postJson("/api/v1/reviews/{$hadith->id}/attempts", [
@@ -49,7 +47,6 @@ class ReviewAndAdminProgressTest extends TestCase
 
         Sanctum::actingAs($user = User::factory()->create());
         $book = Book::factory()->create();
-        UserBook::create(['user_id' => $user->id, 'book_id' => $book->id, 'started_at' => now()]);
         $hadith = Hadith::factory()->create(['book_id' => $book->id, 'text' => 'انما الاعمال بالنيات']);
 
         $this->postJson('/api/v1/memorization/attempts', [

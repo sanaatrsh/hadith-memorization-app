@@ -6,7 +6,6 @@ use App\Models\Book;
 use App\Models\Hadith;
 use App\Models\MemorizationAttempt;
 use App\Models\User;
-use App\Models\UserBook;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Str;
@@ -20,7 +19,6 @@ class SecurityAndReliabilityTest extends TestCase
     private function hadithForUser(User $user): Hadith
     {
         $book = Book::factory()->create();
-        UserBook::create(['user_id' => $user->id, 'book_id' => $book->id, 'started_at' => now()]);
 
         return Hadith::factory()->create(['book_id' => $book->id, 'text' => 'انما الاعمال بالنيات']);
     }

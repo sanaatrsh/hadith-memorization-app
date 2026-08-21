@@ -8,13 +8,13 @@ Arabic word-comparison (the authoritative score) and uses **Gemini** for
 structured Arabic feedback only. A simple spaced-repetition schedule, written &
 voice exams, CSV/Excel import, and admin statistics are included.
 
-The whole book catalogue is readable by every user; adding a book to the
-learning list is what starts memorization (التسميع). What to memorize next comes
+The whole book catalogue belongs to every user — there is no per-user book list
+and nothing has to be selected before memorizing. What to memorize next comes
 from a **stack**: hadiths the user asks to review — or that the evaluator and
 Gemini flag — sit on top, then reviews that are due, then the untouched hadiths
-of the most recently added book. Exams cover a whole book (one question per
-hadith) and release every result, including the correct answers, only once all
-the questions are done.
+of the book the user touched most recently. Exams cover a whole book (one
+question per hadith) and release every result, including the correct answers,
+only once all the questions are done.
 
 ## Stack
 

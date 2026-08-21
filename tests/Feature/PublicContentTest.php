@@ -5,7 +5,7 @@ namespace Tests\Feature;
 use App\Models\Book;
 use App\Models\Hadith;
 use App\Models\User;
-use App\Models\UserBook;
+use App\Models\UserHadithProgress;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
@@ -53,20 +53,25 @@ class PublicContentTest extends TestCase
             ->assertJsonPath('data.intro', 'عن عمر بن الخطاب رضي الله عنه قال');
     }
 
-    public function test_an_authenticated_user_sees_the_whole_catalogue_with_the_books_they_added(): void
+    public function test_an_authenticated_user_sees_the_whole_catalogue_with_their_progress(): void
     {
         Sanctum::actingAs($user = User::factory()->create());
 
-        $added = Book::factory()->create(['title' => 'مضاف', 'sort_order' => 1]);
-        Book::factory()->create(['title' => 'غير مضاف', 'sort_order' => 2]);
-        UserBook::create(['user_id' => $user->id, 'book_id' => $added->id, 'started_at' => now()]);
+        $started = Book::factory()->create(['title' => 'بدأت به', 'sort_order' => 1]);
+        Book::factory()->create(['title' => 'لم أبدأ به', 'sort_order' => 2]);
+
+        UserHadithProgress::factory()->create([
+            'user_id' => $user->id,
+            'hadith_id' => Hadith::factory()->create(['book_id' => $started->id])->id,
+        ]);
 
         $this->getJson('/api/v1/books')
             ->assertOk()
             ->assertJsonCount(2, 'data')
-            ->assertJsonPath('data.0.title', 'مضاف')
-            ->assertJsonPath('data.0.is_added', true)
-            ->assertJsonPath('data.1.title', 'غير مضاف')
-            ->assertJsonPath('data.1.is_added', false);
+            ->assertJsonPath('data.0.title', 'بدأت به')
+            ->assertJsonPath('data.0.is_started', true)
+            ->assertJsonPath('data.0.progress_count', 1)
+            ->assertJsonPath('data.1.title', 'لم أبدأ به')
+            ->assertJsonPath('data.1.is_started', false);
     }
 }

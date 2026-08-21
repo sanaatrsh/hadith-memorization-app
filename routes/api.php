@@ -64,9 +64,9 @@ Route::prefix('v1')->group(function () {
 
     // --- Authenticated user: learning selection & progress ---
     Route::middleware(['auth:sanctum', 'active'])->prefix('user')->group(function () {
-        Route::get('/books', [BookSelectionController::class, 'index']);
-        Route::post('/books/{book}/start', [BookSelectionController::class, 'start']);
-        Route::delete('/books/{book}', [BookSelectionController::class, 'destroy']);
+        // Route::get('/books', [BookSelectionController::class, 'index']);
+        // Route::post('/books/{book}/start', [BookSelectionController::class, 'start']);
+        // Route::delete('/books/{book}', [BookSelectionController::class, 'destroy']);
         Route::get('/progress', [DashboardController::class, 'show']);
         Route::get('/reviews/due', [ReviewController::class, 'due']);
 

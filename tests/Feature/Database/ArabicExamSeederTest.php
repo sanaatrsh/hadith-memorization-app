@@ -54,12 +54,15 @@ class ArabicExamSeederTest extends TestCase
         $this->assertCount(5, $scores);
         $this->assertSame((int) round($scores->avg()), $exam->score);
 
-        // The two factual questions are exact-matched, so they score 100.
+        // The two factual questions are matched token by token, and both
+        // answers carry the stored answer in full, so they score 100.
         $narrator = $exam->questions()->where('sort_order', 0)->sole();
         $this->assertSame('عمر بن الخطاب', $narrator->correct_answer);
         $this->assertSame(100, $narrator->answer->score);
         $this->assertTrue($narrator->answer->is_correct);
-        $this->assertSame(['mode' => 'exact_match'], $narrator->answer->evaluation_report);
+        $this->assertSame('token_match', $narrator->answer->evaluation_report['mode']);
+        $this->assertSame([], $narrator->answer->evaluation_report['missing_words']);
+        $this->assertEquals(1, $narrator->answer->evaluation_report['coverage']);
 
         // The last recall answer drops several words, so it falls below the
         // passing mark and its report lists what was missing.

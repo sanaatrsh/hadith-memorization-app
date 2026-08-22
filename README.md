@@ -14,7 +14,8 @@ from a **stack**: hadiths the user asks to review — or that the evaluator and
 Gemini flag — sit on top, then reviews that are due, then the untouched hadiths
 of the book the user touched most recently. Exams cover a whole book (one
 question per hadith) and release every result, including the correct answers,
-only once all the questions are done.
+only once all the questions are done. Answers are typed, so short factual ones
+are matched token by token — «تميم بن أوس الداري» answers «تميم الداري».
 
 ## Stack
 

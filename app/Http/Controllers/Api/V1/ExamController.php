@@ -113,7 +113,7 @@ class ExamController extends Controller
         path: '/exams/{exam}/answers',
         operationId: 'submitExamAnswer',
         summary: 'Submit an answer to an exam question',
-        description: 'The answer is evaluated and stored, but the result is withheld: scores and correct answers are released only when the exam is completed. Written factual answers are exact-matched after Arabic normalization; recall and voice recitation answers reuse the deterministic transcript comparison. Rate limited to 30 requests/minute.',
+        description: 'The answer is evaluated and stored, but the result is withheld: scores and correct answers are released only when the exam is completed. Answers are typed, never chosen from a list: short factual answers (narrator / takhrij) are matched token by token, so an answer that carries the stored answer in full — or is itself wholly part of it — is correct («تميم بن أوس الداري» answers «تميم الداري»). Recall and voice recitation answers reuse the deterministic word-sequence comparison. Rate limited to 30 requests/minute.',
         tags: ['Exams'],
         security: [['sanctum' => []]],
         parameters: [new OA\Parameter(name: 'exam', in: 'path', required: true, schema: new OA\Schema(type: 'integer'))],

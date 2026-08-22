@@ -11,7 +11,6 @@ use App\Models\Hadith;
 use App\Models\MemorizationAttempt;
 use App\Models\ProgressAudit;
 use App\Models\User;
-use App\Models\UserBook;
 use App\Models\UserHadithProgress;
 use Database\Seeders\ArabicMemorizationSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -45,7 +44,6 @@ class ArabicMemorizationSeederTest extends TestCase
         foreach ($learners as $learner) {
             $this->assertTrue(MemorizationAttempt::where('user_id', $learner->id)->exists());
             $this->assertTrue(UserHadithProgress::where('user_id', $learner->id)->exists());
-            $this->assertTrue(UserBook::where('user_id', $learner->id)->exists());
         }
 
         // Reseeding updates the same attempts instead of duplicating them.

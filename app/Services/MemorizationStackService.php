@@ -173,8 +173,7 @@ class MemorizationStackService
 
     /**
      * The books the user is working in, most recent activity first: any book
-     * they have pushed a hadith of onto the stack, recited from, or (for
-     * installations that still use the optional learning list) added.
+     * they have pushed a hadith of onto the stack or recited from.
      *
      * @return Collection<int,int>
      */
@@ -211,12 +210,6 @@ class MemorizationStackService
 
         foreach ($stackActivity as $row) {
             $record((int) $row->book_id, $row->last_activity);
-        }
-
-        // The learning list is optional now, but when a book is in it that
-        // still counts as working in it.
-        foreach ($user->books()->whereNull('completed_at')->get() as $userBook) {
-            $record($userBook->book_id, $userBook->started_at ?? $userBook->created_at);
         }
 
         arsort($activity);

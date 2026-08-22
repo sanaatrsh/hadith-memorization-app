@@ -107,7 +107,6 @@ class MemorizationAttemptTest extends TestCase
             ->assertOk()
             ->assertJsonPath('data.hadith_id', $hadith->id);
 
-        $this->assertDatabaseCount('user_books', 0);
         $this->assertDatabaseHas('user_hadith_progress', [
             'user_id' => $user->id,
             'hadith_id' => $hadith->id,

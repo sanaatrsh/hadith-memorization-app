@@ -13,7 +13,6 @@ use App\Models\HadithTerm;
 use App\Models\Narrator;
 use App\Models\QuestionTemplate;
 use App\Models\User;
-use App\Models\UserBook;
 use App\Models\UserHadithProgress;
 use Illuminate\Database\Seeder;
 use Illuminate\Support\Facades\Hash;
@@ -182,13 +181,6 @@ class ArabicDemoSeeder extends Seeder
             QuestionTemplate::updateOrCreate(
                 ['prompt_template' => $template['prompt_template']],
                 ['type' => $template['type'], 'is_active' => true],
-            );
-        }
-
-        foreach ($books as $book) {
-            UserBook::updateOrCreate(
-                ['user_id' => $learner->id, 'book_id' => $book->id],
-                ['started_at' => now()->subDays(7), 'completed_at' => null],
             );
         }
 

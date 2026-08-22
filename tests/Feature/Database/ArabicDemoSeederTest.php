@@ -40,7 +40,6 @@ class ArabicDemoSeederTest extends TestCase
         $this->assertDatabaseCount('books', 2);
         $this->assertDatabaseCount('hadiths', 4);
         $this->assertDatabaseCount('question_templates', 4);
-        $this->assertDatabaseCount('user_books', 2);
         $this->assertDatabaseCount('user_hadith_progress', 3);
     }
 }

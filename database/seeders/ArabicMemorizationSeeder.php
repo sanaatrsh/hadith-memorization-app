@@ -14,7 +14,6 @@ use App\Models\Hadith;
 use App\Models\MemorizationAttempt;
 use App\Models\ProgressAudit;
 use App\Models\User;
-use App\Models\UserBook;
 use App\Models\UserHadithProgress;
 use App\Services\ArabicTextNormalizer;
 use App\Services\HadithTextComparisonService;
@@ -72,11 +71,6 @@ class ArabicMemorizationSeeder extends Seeder
             $profileOwners[$index % count($profiles)] ??= $learner;
 
             $this->command?->info("  {$learner->email} → {$profile['label']}");
-
-            UserBook::updateOrCreate(
-                ['user_id' => $learner->id, 'book_id' => $book->id],
-                ['started_at' => now()->subDays(60)],
-            );
 
             foreach ($profile['hadiths'] as $entry) {
                 /** @var Hadith $hadith */

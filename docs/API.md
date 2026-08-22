@@ -324,6 +324,30 @@ to that many distinct hadiths (never repeating one); a larger one is capped at
 the book's hadith count. A template that would ask about something a hadith does
 not carry (no narrator, no takhrij, no `intro`) is skipped for that hadith.
 
+**How a written answer is matched.** Answers are typed, never picked from a
+list. A short factual answer — a narrator or a takhrij, up to
+`athar.answers.factual_max_words` words — is compared token by token after
+Arabic normalization, and counts as correct when either side carries the other:
+
+- the stored answer is fully present, extra words and all — «تميم بن أوس
+  الداري» answers «تميم الداري», and «عمر بن الخطاب رضي الله عنه» answers «عمر
+  بن الخطاب»;
+- or everything the learner wrote belongs to the stored answer and covers at
+  least `athar.answers.partial_min_coverage` of it — «عمر» answers «عمر بن
+  الخطاب», and «البخاري ومسلم» answers «رواه البخاري ومسلم».
+
+Connective words (`athar.answers.ignored_words`: «بن»، «رضي الله عنه»، «رواه» …)
+are dropped from both sides, and a shorter token matches a longer one when it is
+contained in it and at least `athar.answers.containment_min_length` characters
+long — so «مسلم» matches «ومسلم» and «داري» matches «الداري», while «عمر» still
+does not match «عمرو». The report is `{"mode": "token_match", …}` with
+`coverage`, `missing_words`, and `extra_words`; a wrong answer keeps its partial
+score (`round(coverage × 100)`) instead of dropping to zero.
+
+Recall answers — complete the hadith, or recite it — are never matched this
+way: they keep the strict word-sequence comparison, so a partial matn stays
+partial.
+
 **Deferred results.** Nothing about correctness is disclosed until the exam is
 completed: `results_released` is `false`, `score` is `null`, and questions carry
 neither `correct_answer` nor a per-question score. `POST /exams/{exam}/complete`
@@ -405,7 +429,7 @@ POST /api/v1/exams/1/complete
         "correct_answer": "عمر بن الخطاب",
         "is_correct": true,
         "score": 100,
-        "answer": { "answer_text": "عمر بن الخطاب", "score": 100, "is_correct": true, "evaluation_report": { "mode": "exact_match" } }
+        "answer": { "answer_text": "عمر بن الخطاب رضي الله عنه", "score": 100, "is_correct": true, "evaluation_report": { "mode": "token_match", "matched_words": 2, "total_reference_words": 2, "coverage": 1, "missing_words": [], "extra_words": [] } }
       },
       {
         "id": 2,

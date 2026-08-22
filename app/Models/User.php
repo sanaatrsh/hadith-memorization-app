@@ -41,11 +41,6 @@ class User extends Authenticatable
         return $this->role === UserRole::Admin;
     }
 
-    public function books(): HasMany
-    {
-        return $this->hasMany(UserBook::class);
-    }
-
     public function hadithProgress(): HasMany
     {
         return $this->hasMany(UserHadithProgress::class);

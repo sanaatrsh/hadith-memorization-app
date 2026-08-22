@@ -33,6 +33,43 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Written Answer Matching
+    |--------------------------------------------------------------------------
+    | Exam answers are typed by the learner, never chosen from a list, so short
+    | factual answers (narrator / takhrij) are compared token by token: an
+    | answer carrying the whole stored answer — or wholly contained in it — is
+    | correct. «تميم بن أوس الداري» answers «تميم الداري».
+    |
+    | Recall answers (complete / recite the matn) are never matched this way;
+    | they keep the strict word-sequence comparison.
+    */
+    'answers' => [
+        // What still counts as a short factual answer rather than recall.
+        'factual_max_words' => 6,
+        'factual_max_chars' => 80,
+
+        // Words that carry no identifying weight in a name or a takhrij. They
+        // are dropped from both sides before comparing, and may be written with
+        // or without hamza — they are normalized first.
+        'ignored_words' => [
+            'بن', 'ابن', 'بنت', 'أبو', 'أبي',
+            'رضي', 'عنه', 'عنها', 'عنهما', 'تعالى', 'صلى', 'عليه', 'وسلم',
+            'رواه', 'أخرجه', 'رواية', 'حديث', 'عن', 'في', 'من',
+        ],
+
+        // A shorter token matches a longer one when it is contained in it and
+        // at least this long: «مسلم» matches «ومسلم» and «داري» matches
+        // «الداري», while «عمر» still does not match «عمرو».
+        'containment_min_length' => 4,
+
+        // How much of the stored answer a shorter — but entirely correct —
+        // answer must still cover to pass. Keeps a generic word such as «الله»
+        // from answering «عبد الله بن عمر».
+        'partial_min_coverage' => 0.5,
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Simple Spaced Repetition (SRS v1)
     |--------------------------------------------------------------------------
     | srs_level => number of days until the next review.

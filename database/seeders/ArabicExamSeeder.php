@@ -12,7 +12,6 @@ use App\Models\ExamQuestion;
 use App\Models\Hadith;
 use App\Models\QuestionTemplate;
 use App\Models\User;
-use App\Models\UserBook;
 use App\Services\ExamAnswerEvaluator;
 use Illuminate\Database\Seeder;
 use Illuminate\Support\Facades\Hash;
@@ -49,11 +48,6 @@ class ArabicExamSeeder extends Seeder
 
         $book = $this->book($catalogue['book']);
         $learner = $this->learner();
-
-        UserBook::updateOrCreate(
-            ['user_id' => $learner->id, 'book_id' => $book->id],
-            ['started_at' => now()->subDays(7)],
-        );
 
         $hadiths = $book->hadiths()->with('narrator')->get()->keyBy('title');
 

@@ -72,8 +72,6 @@ class MemorizationStackTest extends TestCase
             ->assertOk()
             ->assertJsonPath('data.pushed_count', 1)
             ->assertJsonPath('data.items.0.hadith.id', $hadith->id);
-
-        $this->assertDatabaseCount('user_books', 0);
     }
 
     public function test_an_inactive_hadith_cannot_be_pushed(): void

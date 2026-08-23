@@ -57,7 +57,7 @@ use OpenApi\Attributes as OA;
     required: ['book_id'],
     properties: [
         new OA\Property(property: 'book_id', type: 'integer', example: 2),
-        new OA\Property(property: 'question_count', description: 'Optional. Omit for one question per hadith over the whole book; a smaller number narrows the exam to that many distinct hadiths.', type: 'integer', minimum: 1, maximum: 200, nullable: true, example: 10),
+        new OA\Property(property: 'question_count', description: 'Optional. Omit for a short default exam — the hadiths added to the book today if there are any, else athar.exams.default_question_count (6) hadiths from the book; never the whole book. Given explicitly, it narrows the exam to that many distinct hadiths of the whole book instead.', type: 'integer', minimum: 1, maximum: 200, nullable: true, example: 6),
     ],
     type: 'object',
 )]

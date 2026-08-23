@@ -53,14 +53,15 @@ class ExamTest extends TestCase
         $this->assertArrayNotHasKey('questions', $response->json('data.0'));
     }
 
-    public function test_it_asks_about_every_hadith_of_the_book_exactly_once(): void
+    public function test_it_never_asks_about_the_same_hadith_twice(): void
     {
         Sanctum::actingAs($user = User::factory()->create());
         $book = $this->setupBook(hadiths: 4);
         QuestionTemplate::factory()->create();
         QuestionTemplate::factory()->narrator()->create();
 
-        // No question_count: the exam covers the whole book.
+        // No question_count: all 4 hadiths were added today, and that is
+        // under the default cap, so the exam covers all of them.
         $response = $this->postJson('/api/v1/exams', ['book_id' => $book->id])
             ->assertCreated()
             ->assertJsonPath('data.status', 'in_progress')
@@ -69,11 +70,87 @@ class ExamTest extends TestCase
 
         $hadithIds = collect($response->json('data.questions'))->pluck('hadith_id');
 
-        $this->assertCount(4, $hadithIds->unique(), 'Every hadith must be asked about exactly once.');
+        $this->assertCount(4, $hadithIds->unique(), 'Every hadith must be asked about at most once.');
         $this->assertEqualsCanonicalizing(
             $book->hadiths()->pluck('id')->all(),
             $hadithIds->all(),
         );
+    }
+
+    public function test_the_default_exam_size_is_capped_when_nothing_stands_out_as_todays_work(): void
+    {
+        Sanctum::actingAs(User::factory()->create());
+        // All 9 hadiths were added on an earlier day, so none of them count
+        // as "today's" and the exam falls back to the default cap.
+        $book = $this->setupBook(hadiths: 9);
+        $book->hadiths()->update(['created_at' => now()->subDay()]);
+        QuestionTemplate::factory()->create();
+
+        $response = $this->postJson('/api/v1/exams', ['book_id' => $book->id])
+            ->assertCreated()
+            ->assertJsonPath('data.question_count', 6)
+            ->assertJsonCount(6, 'data.questions');
+
+        $hadithIds = collect($response->json('data.questions'))->pluck('hadith_id');
+        $this->assertCount(6, $hadithIds->unique());
+    }
+
+    public function test_the_default_exam_prefers_hadiths_added_today_over_older_ones(): void
+    {
+        Sanctum::actingAs(User::factory()->create());
+        $book = $this->setupBook(hadiths: 4);
+        $book->hadiths()->update(['created_at' => now()->subDays(3)]);
+
+        // Only these two were added today.
+        $today = Hadith::factory(2)->create([
+            'book_id' => $book->id,
+            'narrator_id' => Narrator::factory()->create()->id,
+            'text' => 'انما الاعمال بالنيات',
+        ]);
+        QuestionTemplate::factory()->create();
+
+        $response = $this->postJson('/api/v1/exams', ['book_id' => $book->id])
+            ->assertCreated()
+            ->assertJsonPath('data.question_count', 2);
+
+        $hadithIds = collect($response->json('data.questions'))->pluck('hadith_id');
+        $this->assertEqualsCanonicalizing($today->pluck('id')->all(), $hadithIds->all());
+    }
+
+    public function test_todays_hadiths_are_also_capped_at_the_default_size(): void
+    {
+        Sanctum::actingAs(User::factory()->create());
+        $book = $this->setupBook(hadiths: 2);
+        $book->hadiths()->update(['created_at' => now()->subDay()]);
+
+        // 8 more added today: still capped at 6, and none of the old 2 leak in.
+        $today = Hadith::factory(8)->create([
+            'book_id' => $book->id,
+            'narrator_id' => Narrator::factory()->create()->id,
+            'text' => 'انما الاعمال بالنيات',
+        ]);
+        QuestionTemplate::factory()->create();
+
+        $response = $this->postJson('/api/v1/exams', ['book_id' => $book->id])
+            ->assertCreated()
+            ->assertJsonPath('data.question_count', 6)
+            ->assertJsonCount(6, 'data.questions');
+
+        $hadithIds = collect($response->json('data.questions'))->pluck('hadith_id');
+        $this->assertCount(6, $hadithIds->unique());
+        $this->assertEmpty($hadithIds->diff($today->pluck('id')), 'Only hadiths added today should be picked.');
+    }
+
+    public function test_an_explicit_question_count_ignores_the_todays_hadiths_default(): void
+    {
+        Sanctum::actingAs(User::factory()->create());
+        $book = $this->setupBook(hadiths: 5);
+        QuestionTemplate::factory()->create();
+
+        // An explicit count draws from the whole book, not just today's slice.
+        $this->postJson('/api/v1/exams', ['book_id' => $book->id, 'question_count' => 5])
+            ->assertCreated()
+            ->assertJsonPath('data.question_count', 5);
     }
 
     public function test_a_question_count_narrows_the_exam_without_repeating_a_hadith(): void

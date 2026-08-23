@@ -70,6 +70,18 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Exams
+    |--------------------------------------------------------------------------
+    | Without an explicit question_count, an exam covers the hadiths added to
+    | the book today (a "test what you added today" exam) when there are any,
+    | otherwise this many hadiths of the book — never the whole book.
+    */
+    'exams' => [
+        'default_question_count' => 6,
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Simple Spaced Repetition (SRS v1)
     |--------------------------------------------------------------------------
     | srs_level => number of days until the next review.

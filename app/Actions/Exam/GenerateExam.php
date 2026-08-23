@@ -16,10 +16,13 @@ use Illuminate\Support\Str;
  * Builds an exam from stored question templates and the selected book's
  * content only. Gemini is never used to invent questions.
  *
- * The exam covers the whole book: every active hadith gets exactly one
- * question, in the book's own order, and the question templates rotate so the
- * types stay varied. Passing a question count only narrows the exam to a
- * subset of the hadiths — a hadith is never asked about twice.
+ * A hadith never gets more than one question, and the question templates
+ * rotate so the types stay varied. Without an explicit question count the
+ * exam stays short: it covers the hadiths added to the book today, so long as
+ * there is at least one, or otherwise the first
+ * `athar.exams.default_question_count` hadiths of the book — never the whole
+ * book by default. Passing a question count explicitly always narrows the
+ * exam to that many hadiths of the book instead.
  */
 class GenerateExam
 {
@@ -96,21 +99,40 @@ class GenerateExam
     }
 
     /**
-     * All the book's hadiths by default; a requested count narrows it to that
-     * many distinct hadiths, kept in the book's order.
+     * An explicit count narrows the book to that many distinct hadiths. Left
+     * unset, the exam stays short: the hadiths added today if there are any,
+     * else a small default slice of the book — the whole book is never the
+     * default.
      *
      * @param  Collection<int,Hadith>  $hadiths
      * @return Collection<int,Hadith>
      */
     private function selectHadiths(Collection $hadiths, ?int $questionCount): Collection
     {
-        if ($questionCount === null || $questionCount >= $hadiths->count()) {
-            return $hadiths;
+        if ($questionCount !== null) {
+            return $this->limitTo($hadiths, $questionCount);
+        }
+
+        $today = $hadiths->filter(fn (Hadith $hadith) => $hadith->created_at?->isToday());
+
+        $defaultCount = (int) config('athar.exams.default_question_count', 6);
+
+        return $this->limitTo($today->isNotEmpty() ? $today->values() : $hadiths, $defaultCount);
+    }
+
+    /**
+     * @param  Collection<int,Hadith>  $hadiths
+     * @return Collection<int,Hadith>
+     */
+    private function limitTo(Collection $hadiths, int $count): Collection
+    {
+        if ($count >= $hadiths->count()) {
+            return $hadiths->values();
         }
 
         return $hadiths
             ->shuffle()
-            ->take($questionCount)
+            ->take($count)
             ->sortBy([['sort_order', 'asc'], ['id', 'asc']])
             ->values();
     }

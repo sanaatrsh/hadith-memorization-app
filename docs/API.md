@@ -312,41 +312,38 @@ Content-Type: application/json
 
 | Method | Endpoint | Request body | Result |
 | --- | --- | --- | --- |
-| POST | `/exams` | `book_id`, optional `question_count` (1–200). | Creates an in-progress exam (`201`) covering the whole book: one question per active hadith, from active templates and the book's own content. Any active book may be examined. |
+| POST | `/exams` | `book_id`, optional `question_count` (1–200). | Creates an in-progress exam (`201`) from active templates and the book's own content. Any active book may be examined. |
 | GET | `/exams/{exam}` | None. | Returns the caller's exam and questions. While it is in progress each question only shows whether it has been answered; once completed the same endpoint returns the results. |
 | POST | `/exams/{exam}/answers` | `exam_question_id`, `answer_text`. | Evaluates and stores one answer but withholds the result — the response is an acknowledgement with the answered/remaining counts. |
 | POST | `/exams/{exam}/complete` | None. | Completes the exam and releases the results: the overall score plus, for every question, its score and the correct answer. |
 
-**Coverage.** Omitting `question_count` asks about every active hadith in the
-book exactly once, in the book's order, with the question templates rotating so
-the types stay varied. A `question_count` smaller than the book narrows the exam
-to that many distinct hadiths (never repeating one); a larger one is capped at
-the book's hadith count. A template that would ask about something a hadith does
-not carry (no narrator, no takhrij, no `intro`) is skipped for that hadith.
+**Question count.** Omitting `question_count` builds a short exam: the
+hadiths added to the book **today** if there are any — a "test what you added
+today" exam — otherwise `athar.exams.default_question_count` (6) hadiths from
+the start of the book. It never defaults to the whole book. Passing
+`question_count` explicitly always narrows the exam to that many distinct
+hadiths of the whole book instead (capped at the book's hadith count), ignoring
+the "today" preference. Question templates rotate so the types stay varied, and
+a template that would ask about something a hadith does not carry (no narrator,
+no takhrij, no `intro`) is skipped for that hadith.
 
-**How a written answer is matched.** Answers are typed, never picked from a
-list. A short factual answer — a narrator or a takhrij, up to
-`athar.answers.factual_max_words` words — is compared token by token after
-Arabic normalization, and counts as correct when either side carries the other:
+**How a written answer is judged.** Answers are typed, never picked from a
+list, so **Gemini grades every answer** against the stored reference — tolerant
+of ordinary Arabic spelling and grammatical-case variance for a factual answer
+(narrator / takhrij), such as «أبي هريرة» for «أبو هريرة» or «تميم بن أوس
+الداري» for «تميم الداري», while still holding a recall answer (complete /
+recite the matn) to the full wording, with partial credit for a partial
+recitation. The report is `{"mode": "gemini", "feedback_ar": "…", …}`.
 
-- the stored answer is fully present, extra words and all — «تميم بن أوس
-  الداري» answers «تميم الداري», and «عمر بن الخطاب رضي الله عنه» answers «عمر
-  بن الخطاب»;
-- or everything the learner wrote belongs to the stored answer and covers at
-  least `athar.answers.partial_min_coverage` of it — «عمر» answers «عمر بن
-  الخطاب», and «البخاري ومسلم» answers «رواه البخاري ومسلم».
-
-Connective words (`athar.answers.ignored_words`: «بن»، «رضي الله عنه»، «رواه» …)
-are dropped from both sides, and a shorter token matches a longer one when it is
-contained in it and at least `athar.answers.containment_min_length` characters
-long — so «مسلم» matches «ومسلم» and «داري» matches «الداري», while «عمر» still
-does not match «عمرو». The report is `{"mode": "token_match", …}` with
-`coverage`, `missing_words`, and `extra_words`; a wrong answer keeps its partial
-score (`round(coverage × 100)`) instead of dropping to zero.
-
-Recall answers — complete the hadith, or recite it — are never matched this
-way: they keep the strict word-sequence comparison, so a partial matn stays
-partial.
+If Gemini is unavailable — no API key, a timeout, a rate limit, an invalid
+response — the exam is still graded: evaluation falls back to a deterministic
+comparison so it is never blocked on Gemini being reachable. For a factual
+answer that is a token-by-token comparison (`athar.answers.*` configures which
+words are ignored, e.g. «بن»، «رضي الله عنه»، «رواه», and how much of the
+stored answer must be covered); for a recall answer it is the same
+word-sequence comparison the live memorization flow uses. The fallback report
+carries `"mode": "token_match"` or the word-sequence fields, plus
+`"ai_available": false` and a `failure_code`.
 
 **Deferred results.** Nothing about correctness is disclosed until the exam is
 completed: `results_released` is `false`, `score` is `null`, and questions carry
@@ -373,7 +370,7 @@ POST /api/v1/exams
     "user_id": 2,
     "book_id": 1,
     "status": "in_progress",
-    "question_count": 42,
+    "question_count": 6,
     "results_released": false,
     "score": null,
     "started_at": "2026-07-23T00:00:00.000000Z",
@@ -429,7 +426,7 @@ POST /api/v1/exams/1/complete
         "correct_answer": "عمر بن الخطاب",
         "is_correct": true,
         "score": 100,
-        "answer": { "answer_text": "عمر بن الخطاب رضي الله عنه", "score": 100, "is_correct": true, "evaluation_report": { "mode": "token_match", "matched_words": 2, "total_reference_words": 2, "coverage": 1, "missing_words": [], "extra_words": [] } }
+        "answer": { "answer_text": "عمر بن الخطاب رضي الله عنه", "score": 100, "is_correct": true, "evaluation_report": { "mode": "gemini", "feedback_ar": "إجابة صحيحة، نفس الاسم بصيغة إعرابية مختلفة." } }
       },
       {
         "id": 2,
@@ -441,7 +438,7 @@ POST /api/v1/exams/1/complete
         "correct_answer": "بني الإسلام على خمس ...",
         "is_correct": false,
         "score": 52,
-        "answer": { "answer_text": "...", "score": 52, "is_correct": false, "evaluation_report": { "score": 52, "missing_words": ["..."] } }
+        "answer": { "answer_text": "...", "score": 52, "is_correct": false, "evaluation_report": { "mode": "gemini", "feedback_ar": "ذكر جزءا من الحديث ونقص الباقي." } }
       }
     ]
   }

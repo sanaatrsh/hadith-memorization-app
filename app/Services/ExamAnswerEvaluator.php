@@ -2,27 +2,33 @@
 
 namespace App\Services;
 
+use App\Contracts\Ai\ExamAnswerGrader;
+use App\Data\Ai\ExamAnswerGradeData;
 use App\Enums\ExamQuestionType;
 use App\Models\ExamQuestion;
 
 /**
- * Evaluates exam answers deterministically.
+ * Evaluates exam answers with Gemini as the judge.
  *
- * Answers are typed by the learner, never picked from a list, so short factual
- * answers (narrator / takhrij) are compared token by token instead of character
- * by character: an answer that carries the whole stored answer — or is itself
- * wholly part of it — counts as correct. «تميم بن أوس الداري» therefore answers
- * «تميم الداري», and «البخاري ومسلم» answers «رواه البخاري ومسلم».
+ * Answers are typed by the learner, never picked from a list, so a strict
+ * string match against the stored answer rejects perfectly good answers over
+ * ordinary Arabic spelling and grammatical-case variance («تميم بن أوس
+ * الداري» is «تميم الداري»). Gemini is asked to compare the submitted answer
+ * with the stored reference and judge whether it is correct, tolerant of that
+ * variance for factual answers (narrator / takhrij) while still holding
+ * recall answers (complete / recite the matn) to the full wording.
  *
- * Recall answers (complete / voice recitation) keep the strict word-sequence
- * comparison used by the memorization flow — reciting part of a matn is not the
- * same as reciting it.
+ * If Gemini is unavailable the exam must still be gradable, so evaluation
+ * falls back to a deterministic comparison: token-by-token for a factual
+ * answer, word-sequence for a recall answer — the same authoritative
+ * comparison the live memorization flow uses.
  */
 class ExamAnswerEvaluator
 {
     public function __construct(
         private readonly ArabicTextNormalizer $normalizer,
         private readonly HadithTextComparisonService $comparison,
+        private readonly ExamAnswerGrader $grader,
     ) {}
 
     /**
@@ -31,15 +37,74 @@ class ExamAnswerEvaluator
     public function evaluate(ExamQuestion $question, string $answerText): array
     {
         $correct = (string) ($question->correct_answer ?? '');
-        $passing = (int) config('athar.scoring.passing');
+        $isFactual = $question->type === ExamQuestionType::Written && $this->isFactual($correct);
 
-        // Factual short answers: token comparison, tolerant of a fuller or a
-        // shorter wording of the same name or takhrij.
-        if ($question->type === ExamQuestionType::Written && $this->isFactual($correct)) {
-            return $this->matchFactual($correct, $answerText);
+        if (trim($answerText) === '' || trim($correct) === '') {
+            return $this->fallback($correct, $answerText, $isFactual);
         }
 
-        // Recall answers (complete / voice recitation): word-sequence comparison.
+        $grade = $this->grader->grade([
+            'question_text' => $question->question_text,
+            'correct_answer' => $correct,
+            'answer_text' => $answerText,
+            'question_kind' => $isFactual ? 'factual' : 'recall',
+        ]);
+
+        if ($grade->available) {
+            return $this->fromGrade($grade);
+        }
+
+        return $this->fallback($correct, $answerText, $isFactual, $grade);
+    }
+
+    /**
+     * @return array{score:int, is_correct:bool, report:array<string,mixed>}
+     */
+    private function fromGrade(ExamAnswerGradeData $grade): array
+    {
+        $score = $grade->score ?? 0;
+
+        return [
+            'score' => $score,
+            'is_correct' => $grade->isCorrect ?? false,
+            'report' => [
+                'mode' => 'gemini',
+                'feedback_ar' => $grade->feedbackAr,
+                'gemini_model' => $grade->model,
+                'gemini_interaction_id' => $grade->interactionId,
+            ],
+        ];
+    }
+
+    /**
+     * The deterministic comparison, used only when Gemini could not grade the
+     * answer (or there is nothing to grade), so an exam is never stuck.
+     *
+     * @return array{score:int, is_correct:bool, report:array<string,mixed>}
+     */
+    private function fallback(string $correct, string $answerText, bool $isFactual, ?ExamAnswerGradeData $grade = null): array
+    {
+        $result = $isFactual
+            ? $this->matchFactual($correct, $answerText)
+            : $this->matchRecall($correct, $answerText);
+
+        $result['report']['ai_available'] = false;
+
+        if ($grade !== null) {
+            $result['report']['failure_code'] = $grade->failureCode;
+            $result['report']['failure_message'] = $grade->failureMessage;
+        }
+
+        return $result;
+    }
+
+    /**
+     * @return array{score:int, is_correct:bool, report:array<string,mixed>}
+     */
+    private function matchRecall(string $correct, string $answerText): array
+    {
+        $passing = (int) config('athar.scoring.passing');
+
         $report = $this->comparison->compare(
             $this->normalizer->normalize($correct),
             $this->normalizer->normalize($answerText),

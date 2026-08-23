@@ -14,8 +14,14 @@ from a **stack**: hadiths the user asks to review — or that the evaluator and
 Gemini flag — sit on top, then reviews that are due, then the untouched hadiths
 of the book the user touched most recently. Exams cover a whole book (one
 question per hadith) and release every result, including the correct answers,
-only once all the questions are done. Answers are typed, so short factual ones
-are matched token by token — «تميم بن أوس الداري» answers «تميم الداري».
+only once all the questions are done. Answers are typed, so Gemini judges
+every one against the stored reference — tolerant of ordinary spelling and
+grammatical-case variance for a factual answer («تميم بن أوس الداري» answers
+«تميم الداري») while still holding a recall answer to the full wording — and
+falls back to a deterministic comparison whenever Gemini is unavailable, so an
+exam is never blocked on it. Without a question count an exam stays short: the
+hadiths added today if there are any, else a handful (6) from the book — never
+the whole book.
 
 ## Stack
 
@@ -24,6 +30,7 @@ are matched token by token — «تميم بن أوس الداري» answers «�
 - Spatie Media Library (book covers, official hadith audio)
 - maatwebsite/excel (hadith import)
 - Gemini via Laravel HTTP client (no SDK), behind a `HadithEvaluator` interface
+  (recitation feedback) and an `ExamAnswerGrader` interface (exam grading)
 
 ## Requirements
 
@@ -61,13 +68,15 @@ php artisan test          # full suite
 app/
   Actions/Memorization/EvaluateMemorizationAttempt.php   # core evaluation flow
   Actions/Exam/GenerateExam.php
-  Clients/Gemini/                                        # Gemini client + parser
-  Contracts/Ai/HadithEvaluator.php                       # AI provider interface
+  Clients/Gemini/                                        # Gemini clients + parsers
+  Contracts/Ai/HadithEvaluator.php                       # recitation feedback provider
+  Contracts/Ai/ExamAnswerGrader.php                      # exam answer grading provider
   Data/Ai/HadithEvaluationData.php                       # validated AI result DTO
+  Data/Ai/ExamAnswerGradeData.php                        # validated exam-grade DTO
   Services/ArabicTextNormalizer.php
-  Services/HadithTextComparisonService.php               # authoritative scoring
+  Services/HadithTextComparisonService.php               # authoritative live-recitation scoring
   Services/SpacedRepetitionService.php
-  Services/ExamAnswerEvaluator.php
+  Services/ExamAnswerEvaluator.php                        # Gemini-graded, deterministic fallback
   Services/MemorizationStackService.php                   # the memorization queue (stack)
   Enums/                                                 # finite states
   Http/Controllers/Api/V1/                               # thin controllers

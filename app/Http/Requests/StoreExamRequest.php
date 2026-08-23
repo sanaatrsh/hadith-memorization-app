@@ -15,7 +15,8 @@ class StoreExamRequest extends FormRequest
     {
         return [
             'book_id' => ['required', 'integer', 'exists:books,id'],
-            // Optional: the exam covers every hadith in the book by default.
+            // Optional: without it, the exam defaults to today's hadiths (or a
+            // small slice of the book) rather than the whole book.
             'question_count' => ['sometimes', 'nullable', 'integer', 'min:1', 'max:200'],
         ];
     }

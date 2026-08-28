@@ -308,6 +308,14 @@ Content-Type: application/json
 
 `client_attempt_uuid` is required and makes retries idempotent for the same user. The deterministic word comparison controls `score` and `verdict`; Gemini feedback is additional only. If Gemini is unavailable, the request still succeeds with `ai_feedback_available: false` and a deterministic report. The API compares text only; it does not assess pronunciation.
 
+**Speech-to-text artefacts are not errors.** The transcript is produced by the
+recognizer on the device, which cannot distinguish a ta marbuta from a ha — it
+returns «امراه» for «امرأة» and «الامه» for «الأمة». Both sides are therefore
+normalized with `athar.normalization.normalize_ta_marbuta` on, so that pair
+never shows up as a substitution, and the Gemini prompt is told to ignore it
+along with diacritics and hamza/alef variants. `normalize_alef_maksura`
+(ى → ي) stays off: it collapses genuinely different words («على» vs «علي»).
+
 ## Exams
 
 | Method | Endpoint | Request body | Result |
@@ -337,7 +345,12 @@ recitation. The report is `{"mode": "gemini", "feedback_ar": "…", …}`.
 
 If Gemini is unavailable — no API key, a timeout, a rate limit, an invalid
 response — the exam is still graded: evaluation falls back to a deterministic
-comparison so it is never blocked on Gemini being reachable. For a factual
+comparison so it is never blocked on Gemini being reachable. Because that
+fallback is silent by design, it is also logged (`exam.answer.graded_without_ai`
+with a `failure_code`), and `php artisan athar:gemini-check` makes the real call
+and prints what came back — including the model names the key may use, since a
+wrong `GEMINI_MODEL` is rejected with HTTP 404 and otherwise looks like any
+other outage. For a factual
 answer that is a token-by-token comparison (`athar.answers.*` configures which
 words are ignored, e.g. «بن»، «رضي الله عنه»، «رواه», and how much of the
 stored answer must be covered); for a recall answer it is the same

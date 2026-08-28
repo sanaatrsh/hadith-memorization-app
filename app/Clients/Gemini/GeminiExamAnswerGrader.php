@@ -4,124 +4,117 @@ namespace App\Clients\Gemini;
 
 use App\Contracts\Ai\ExamAnswerGrader;
 use App\Data\Ai\ExamAnswerGradeData;
-use Illuminate\Http\Client\ConnectionException;
-use Illuminate\Support\Facades\Http;
-use Illuminate\Support\Facades\Log;
-use Throwable;
 
 /**
  * Grades a written exam answer against the stored reference answer.
  *
  * This is a distinct AI use case from recitation feedback
- * ({@see GeminiClient}): here Gemini is the judge of
- * whether a typed answer is correct, tolerant of the Arabic spelling and
- * grammatical-case variance a strict string match would reject, so it has
- * its own minimal prompt and schema instead of reusing the recitation one.
+ * ({@see GeminiClient}): here Gemini is the judge of whether a typed answer is
+ * correct, tolerant of the Arabic spelling and grammatical-case variance a
+ * strict string match would reject, so it has its own prompt and schema
+ * instead of reusing the recitation one.
  */
 class GeminiExamAnswerGrader implements ExamAnswerGrader
 {
     private const SYSTEM_INSTRUCTION = <<<'TEXT'
         You grade one written answer to an Arabic hadith exam question. You are
-        given the reference answer and the learner's answer; the reference is
-        always authoritative and must never be treated as wrong.
+        given the reference answer stored in the database and the learner's
+        typed answer. The reference is always authoritative and must never be
+        treated as wrong.
+
+        Decide whether the learner's answer means the same thing as the
+        reference, not whether it is spelled the same way.
 
         For a factual question (the narrator of the hadith, or its takhrij /
-        source), accept ordinary Arabic variation that still names the same
-        person or source: a different grammatical case ending, kunya vs. given
-        name vs. nasab, hamza spelling, added honorifics (رضي الله عنه), or an
-        incomplete lineage. Reject a different person or source entirely.
+        source), accept any wording that still identifies the same person or
+        source. Accept all of the following as correct:
+          - a different grammatical case ending: "أبي ذر" for "أبو ذر"
+          - a shorter form of the same name: "أبي ذر" for "أبو ذر الغفاري",
+            or "عمر" for "عمر بن الخطاب"
+          - a fuller form of the same name: "تميم بن أوس الداري" for
+            "تميم الداري"
+          - kunya, given name, or nasab used interchangeably for one person
+          - hamza and alef spelling variants, with or without diacritics
+          - a ta marbuta written as a ha: "معاويه" for "معاوية"
+          - added honorifics such as "رضي الله عنه"
+          - naming one collector when the reference names several:
+            "رواه مسلم" for "رواه البخاري ومسلم"
+        Mark it incorrect only when the answer names a genuinely different
+        person or source, or names no one at all.
 
         For a recall question (complete the hadith, or recite it), the answer
-        must faithfully reproduce the reference wording. Minor spelling
-        normalization is fine, but a missing clause, an added one, or a
-        substituted word is an error — score down for how much is missing or
-        wrong rather than failing the whole answer outright.
+        must faithfully reproduce the reference wording. A missing clause, an
+        added one, or a substituted word is an error — score down in proportion
+        to how much is missing or wrong rather than failing the whole answer
+        outright. Spelling variance is never an error: a recall answer may be
+        dictated through speech-to-text, so a ta marbuta written as a ha
+        ("امراه" for "امراة"), missing diacritics, and hamza or alef variants
+        ("الى" for "إلى") all count as correct.
 
-        Never invent facts that are not in the reference. Write feedback_ar in
-        Arabic. Return JSON only, matching the required schema.
+        score is an integer from 0 to 100. A correct answer scores 100. Keep
+        is_correct and score consistent with each other. Never invent facts that
+        are not in the reference. Write feedback_ar in Arabic, one short
+        sentence. Return JSON only, matching the required schema.
         TEXT;
 
-    public function __construct(private readonly GeminiExamAnswerParser $parser) {}
+    public function __construct(
+        private readonly GeminiTransport $transport,
+        private readonly GeminiExamAnswerParser $parser,
+    ) {}
 
     /**
      * @param  array<string,mixed>  $context
      */
     public function grade(array $context): ExamAnswerGradeData
     {
-        $model = (string) config('services.gemini.model');
+        $result = $this->transport->send(
+            self::SYSTEM_INSTRUCTION,
+            $this->input($context),
+            $this->responseSchema(),
+        );
 
-        if (empty(config('services.gemini.api_key'))) {
-            return ExamAnswerGradeData::unavailable('missing_api_key', 'Gemini API key is not configured.');
+        if ($result['body'] === null) {
+            return ExamAnswerGradeData::unavailable(
+                (string) $result['failure_code'],
+                (string) $result['failure_message'],
+            );
         }
 
-        try {
-            $response = Http::baseUrl(config('services.gemini.base_url'))
-                ->acceptJson()
-                ->withHeaders(['x-goog-api-key' => config('services.gemini.api_key')])
-                ->connectTimeout((int) config('services.gemini.connect_timeout'))
-                ->timeout((int) config('services.gemini.timeout'))
-                ->retry((int) config('services.gemini.retry_times'), 500, throw: false)
-                ->post('/interactions', $this->payload($context, $model));
-        } catch (ConnectionException $e) {
-            return ExamAnswerGradeData::unavailable('gemini_timeout', 'Gemini request timed out.');
-        } catch (Throwable $e) {
-            Log::warning('Gemini exam grading request failed', ['message' => $e->getMessage()]);
-
-            return ExamAnswerGradeData::unavailable('gemini_error', 'Gemini request failed.');
-        }
-
-        if ($response->status() === 429) {
-            return ExamAnswerGradeData::unavailable('gemini_rate_limited', 'Gemini rate limit reached.');
-        }
-
-        if ($response->failed()) {
-            return ExamAnswerGradeData::unavailable('gemini_http_error', 'Gemini returned an error status: '.$response->status());
-        }
-
-        return $this->parser->parse($response->json() ?? [], $model);
+        return $this->parser->parse($result['body'], $result['model']);
     }
 
     /**
      * @param  array<string,mixed>  $context
-     * @return array<string,mixed>
      */
-    private function payload(array $context, string $model): array
+    private function input(array $context): string
     {
-        $input = collect([
-            'Question kind: '.($context['question_kind'] ?? 'factual'),
+        $kind = ($context['question_kind'] ?? 'factual') === 'recall'
+            ? 'recall (the answer must reproduce the reference wording)'
+            : 'factual (accept any wording naming the same person or source)';
+
+        return collect([
+            'Question kind: '.$kind,
             'Question: '.($context['question_text'] ?? ''),
             'Reference answer: '.($context['correct_answer'] ?? ''),
             "Learner's answer: ".($context['answer_text'] ?? ''),
         ])->implode("\n");
-
-        return [
-            'model' => $model,
-            'store' => (bool) config('services.gemini.store'),
-            'system_instruction' => self::SYSTEM_INSTRUCTION,
-            'input' => $input,
-            'generation_config' => [
-                'temperature' => 0.1,
-                'thinking_level' => 'low',
-            ],
-            'response_format' => [
-                'type' => 'text',
-                'mime_type' => 'application/json',
-                'schema' => $this->responseSchema(),
-            ],
-        ];
     }
 
     /**
+     * Upper-case Type values and no numeric bounds: that is the subset of JSON
+     * Schema `responseSchema` accepts. The 0-100 range is stated in the prompt
+     * and clamped by the parser.
+     *
      * @return array<string,mixed>
      */
     private function responseSchema(): array
     {
         return [
-            'type' => 'object',
+            'type' => 'OBJECT',
             'properties' => [
-                'is_correct' => ['type' => 'boolean'],
-                'score' => ['type' => 'integer', 'minimum' => 0, 'maximum' => 100],
-                'feedback_ar' => ['type' => 'string'],
+                'is_correct' => ['type' => 'BOOLEAN'],
+                'score' => ['type' => 'INTEGER'],
+                'feedback_ar' => ['type' => 'STRING'],
             ],
             'required' => ['is_correct', 'score', 'feedback_ar'],
         ];

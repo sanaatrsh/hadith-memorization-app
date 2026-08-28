@@ -4,64 +4,67 @@ namespace App\Clients\Gemini;
 
 use App\Contracts\Ai\HadithEvaluator;
 use App\Data\Ai\HadithEvaluationData;
-use Illuminate\Http\Client\ConnectionException;
-use Illuminate\Support\Facades\Http;
-use Illuminate\Support\Facades\Log;
-use Throwable;
 
+/**
+ * Structured Arabic feedback on a recitation attempt.
+ *
+ * The score this returns is diagnostic only: the deterministic word comparison
+ * stays the authoritative score, so a Gemini outage never changes a learner's
+ * mark — see EvaluateMemorizationAttempt.
+ */
 class GeminiClient implements HadithEvaluator
 {
-    private const SYSTEM_INSTRUCTION = 'You evaluate Arabic hadith memorization. Use only the supplied canonical text and transcript. Never invent or correct the canonical hadith. Return Arabic feedback using the required JSON schema.';
+    private const SYSTEM_INSTRUCTION = <<<'TEXT'
+        You evaluate Arabic hadith memorization. Use only the supplied canonical
+        text and transcript. Never invent or correct the canonical hadith.
 
-    public function __construct(private readonly GeminiResponseParser $parser) {}
+        The transcript comes from speech-to-text, so it carries recognizer
+        artefacts that are not memorization mistakes. Never report these as
+        errors:
+          - a ta marbuta written as a ha: "امراه" for "امراة", "الامه" for
+            "الامة" — the two are indistinguishable in speech
+          - missing or different diacritics (tashkeel)
+          - hamza and alef spelling variants: "الى" for "إلى", "اعمال" for
+            "أعمال"
+        Report only real recall errors: a missing word or clause, an added one,
+        a substituted word, or a reordered passage.
+
+        score is an integer from 0 to 100. Return Arabic feedback using the
+        required JSON schema.
+        TEXT;
+
+    public function __construct(
+        private readonly GeminiTransport $transport,
+        private readonly GeminiResponseParser $parser,
+    ) {}
 
     /**
      * @param  array<string,mixed>  $context
      */
     public function evaluate(array $context): HadithEvaluationData
     {
-        $model = (string) config('services.gemini.model');
+        $result = $this->transport->send(
+            self::SYSTEM_INSTRUCTION,
+            $this->input($context),
+            $this->responseSchema(),
+        );
 
-        if (empty(config('services.gemini.api_key'))) {
-            return HadithEvaluationData::unavailable('missing_api_key', 'Gemini API key is not configured.');
+        if ($result['body'] === null) {
+            return HadithEvaluationData::unavailable(
+                (string) $result['failure_code'],
+                (string) $result['failure_message'],
+            );
         }
 
-        try {
-            $response = Http::baseUrl(config('services.gemini.base_url'))
-                ->acceptJson()
-                ->withHeaders(['x-goog-api-key' => config('services.gemini.api_key')])
-                ->connectTimeout((int) config('services.gemini.connect_timeout'))
-                ->timeout((int) config('services.gemini.timeout'))
-                ->retry((int) config('services.gemini.retry_times'), 500, throw: false)
-                ->post('/interactions', $this->payload($context, $model));
-        } catch (ConnectionException $e) {
-            return HadithEvaluationData::unavailable('gemini_timeout', 'Gemini request timed out.');
-        } catch (Throwable $e) {
-            Log::warning('Gemini request failed', ['message' => $e->getMessage()]);
-
-            return HadithEvaluationData::unavailable('gemini_error', 'Gemini request failed.');
-        }
-
-        if ($response->status() === 429) {
-            return HadithEvaluationData::unavailable('gemini_rate_limited', 'Gemini rate limit reached.');
-        }
-
-        if ($response->failed()) {
-            return HadithEvaluationData::unavailable('gemini_http_error', 'Gemini returned an error status: '.$response->status());
-        }
-
-        return $this->parser->parse($response->json() ?? [], $model);
+        return $this->parser->parse($result['body'], $result['model']);
     }
 
     /**
      * @param  array<string,mixed>  $context
-     * @return array<string,mixed>
      */
-    private function payload(array $context, string $model): array
+    private function input(array $context): string
     {
-        $comparison = $context['comparison'] ?? [];
-
-        $input = collect([
+        return collect([
             'Reference: '.($context['canonical_text'] ?? ''),
             'Title: '.($context['title'] ?? ''),
             'Narrator: '.($context['narrator'] ?? ''),
@@ -69,53 +72,53 @@ class GeminiClient implements HadithEvaluator
             'Session type: '.($context['session_type'] ?? ''),
             'Current SRS level: '.($context['srs_level'] ?? 0),
             'Transcript: '.($context['transcript'] ?? ''),
-            'Objective comparison: '.json_encode($comparison, JSON_UNESCAPED_UNICODE),
+            'Objective comparison: '.json_encode($context['comparison'] ?? [], JSON_UNESCAPED_UNICODE),
         ])->implode("\n");
-
-        return [
-            'model' => $model,
-            'store' => (bool) config('services.gemini.store'),
-            'system_instruction' => self::SYSTEM_INSTRUCTION,
-            'input' => $input,
-            'generation_config' => [
-                'temperature' => 0.1,
-                'thinking_level' => 'low',
-            ],
-            'response_format' => [
-                'type' => 'text',
-                'mime_type' => 'application/json',
-                'schema' => $this->responseSchema(),
-            ],
-        ];
     }
 
     /**
+     * Upper-case Type values and no numeric bounds — the subset
+     * `responseSchema` accepts. The 0-100 range is stated in the prompt and
+     * clamped by the parser.
+     *
      * @return array<string,mixed>
      */
     private function responseSchema(): array
     {
         return [
-            'type' => 'object',
+            'type' => 'OBJECT',
             'properties' => [
-                'is_textually_correct' => ['type' => 'boolean'],
-                'score' => ['type' => 'integer', 'minimum' => 0, 'maximum' => 100],
-                'verdict' => ['type' => 'string', 'enum' => ['correct', 'acceptable', 'needs_review', 'incorrect']],
-                'missing_words' => ['type' => 'array', 'items' => ['type' => 'string']],
-                'extra_words' => ['type' => 'array', 'items' => ['type' => 'string']],
+                'is_textually_correct' => ['type' => 'BOOLEAN'],
+                'score' => ['type' => 'INTEGER'],
+                'verdict' => [
+                    'type' => 'STRING',
+                    'enum' => ['correct', 'acceptable', 'needs_review', 'incorrect'],
+                ],
+                'missing_words' => [
+                    'type' => 'ARRAY',
+                    'items' => ['type' => 'STRING'],
+                ],
+                'extra_words' => [
+                    'type' => 'ARRAY',
+                    'items' => ['type' => 'STRING'],
+                ],
                 'incorrect_segments' => [
-                    'type' => 'array',
+                    'type' => 'ARRAY',
                     'items' => [
-                        'type' => 'object',
+                        'type' => 'OBJECT',
                         'properties' => [
-                            'expected' => ['type' => 'string'],
-                            'received' => ['type' => 'string'],
-                            'explanation_ar' => ['type' => 'string'],
+                            'expected' => ['type' => 'STRING'],
+                            'received' => ['type' => 'STRING'],
+                            'explanation_ar' => ['type' => 'STRING'],
                         ],
                         'required' => ['expected', 'received', 'explanation_ar'],
                     ],
                 ],
-                'feedback_ar' => ['type' => 'string'],
-                'recommended_action' => ['type' => 'string', 'enum' => ['continue', 'repeat_now', 'review_later']],
+                'feedback_ar' => ['type' => 'STRING'],
+                'recommended_action' => [
+                    'type' => 'STRING',
+                    'enum' => ['continue', 'repeat_now', 'review_later'],
+                ],
             ],
             'required' => [
                 'is_textually_correct', 'score', 'verdict', 'missing_words',

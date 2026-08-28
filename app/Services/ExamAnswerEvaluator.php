@@ -6,6 +6,7 @@ use App\Contracts\Ai\ExamAnswerGrader;
 use App\Data\Ai\ExamAnswerGradeData;
 use App\Enums\ExamQuestionType;
 use App\Models\ExamQuestion;
+use Illuminate\Support\Facades\Log;
 
 /**
  * Evaluates exam answers with Gemini as the judge.
@@ -93,6 +94,13 @@ class ExamAnswerEvaluator
         if ($grade !== null) {
             $result['report']['failure_code'] = $grade->failureCode;
             $result['report']['failure_message'] = $grade->failureMessage;
+
+            // Without this, a misconfigured or unreachable Gemini looks exactly
+            // like a working deterministic grade and goes unnoticed.
+            Log::warning('exam.answer.graded_without_ai', [
+                'failure_code' => $grade->failureCode,
+                'failure_message' => $grade->failureMessage,
+            ]);
         }
 
         return $result;

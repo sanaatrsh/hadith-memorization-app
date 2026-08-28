@@ -16,9 +16,17 @@ return [
         'remove_diacritics' => true,   // tashkeel
         'remove_tatweel' => true,      // ـ
         'normalize_alef' => true,      // أ إ آ -> ا
-        // The two below can mask genuine mistakes; disabled by default.
-        'normalize_alef_maksura' => false, // ى -> ي
-        'normalize_ta_marbuta' => false,   // ة -> ه
+
+        // ة -> ه. Enabled because speech-to-text transcribes a ta marbuta as a
+        // ha ("امراة" comes back as "امراه"), and the two are indistinguishable
+        // in speech anyway. Leaving it off charged the learner for an error the
+        // recognizer made, not one they made.
+        'normalize_ta_marbuta' => true,
+
+        // ى -> ي. Still off: unlike the ta marbuta above, this one collapses
+        // pairs that are genuinely different words ("على" vs "علي"), and the
+        // recognizer distinguishes them well enough to be worth checking.
+        'normalize_alef_maksura' => false,
     ],
 
     /*

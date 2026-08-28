@@ -58,4 +58,25 @@ class HadithTextComparisonServiceTest extends TestCase
 
         $this->assertSame(0, $result['score']);
     }
+
+    public function test_a_ta_marbuta_heard_as_a_ha_is_not_an_error(): void
+    {
+        // What the memorization flow actually does: normalize both sides, then
+        // compare. Speech-to-text returns "امراه" and "الامه" for the canonical
+        // "امرأة" and "الأمة", which used to be reported as substitutions.
+        $normalizer = new ArabicTextNormalizer;
+
+        $reference = 'ومن كانت هجرته لدنيا يصيبها او امرأة ينكحها';
+        $recognized = 'ومن كانت هجرته لدنيا يصيبها او امراه ينكحها';
+
+        $result = $this->service->compare(
+            $normalizer->normalize($reference),
+            $normalizer->normalize($recognized),
+        );
+
+        $this->assertSame(100, $result['score']);
+        $this->assertEmpty($result['substitutions']);
+        $this->assertEmpty($result['missing_words']);
+        $this->assertEmpty($result['extra_words']);
+    }
 }

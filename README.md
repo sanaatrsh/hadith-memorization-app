@@ -89,6 +89,10 @@ docs/API.md                                              # full endpoint referen
 - Scoring thresholds, Arabic normalization rules, and SRS intervals live in
   `config/athar.php`.
 - Gemini credentials are server-only; see `docs/API.md` → Gemini Configuration.
+- Gemini is called over `POST {base_url}/models/{model}:generateContent` with a
+  required `responseSchema`. Verify a deployment with
+  `php artisan athar:gemini-check`, which lists the models the key may use and
+  grades one sample answer.
 - Transcript retention: `attempts:prune-transcripts` (scheduled daily) removes
   raw transcript text older than `ATTEMPT_TRANSCRIPT_RETENTION_DAYS` while
   keeping scores and reports.

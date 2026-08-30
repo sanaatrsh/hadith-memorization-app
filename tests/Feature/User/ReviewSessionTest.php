@@ -299,6 +299,46 @@ class ReviewSessionTest extends TestCase
             ->assertJsonPath('data.summary.total_hadiths', 0);
     }
 
+    public function test_a_recitation_joins_the_open_session_without_being_told_its_id(): void
+    {
+        // The app recites without passing review_session_id. The result screen
+        // was empty because nothing was ever linked to the sitting.
+        Sanctum::actingAs($user = User::factory()->create());
+        $this->fakeGemini();
+
+        $hadith = $this->hadith();
+        $this->due($user, $hadith, '-1 day');
+
+        $sessionId = $this->postJson('/api/v1/user/review-sessions')->json('data.id');
+
+        // No review_session_id in the payload.
+        $this->recite($hadith, 'انما الاعمال بالنيات')->assertOk();
+
+        $this->postJson("/api/v1/user/review-sessions/{$sessionId}/complete")
+            ->assertOk()
+            ->assertJsonPath('data.score', 100)
+            ->assertJsonPath('data.summary.recited_count', 1)
+            ->assertJsonPath('data.summary.skipped_count', 0)
+            ->assertJsonPath('data.summary.correct_count', 1)
+            ->assertJsonPath('data.items.0.score', 100);
+    }
+
+    public function test_a_recitation_outside_any_session_is_still_evaluated(): void
+    {
+        Sanctum::actingAs($user = User::factory()->create());
+        $this->fakeGemini();
+
+        $hadith = $this->hadith();
+        $this->due($user, $hadith, '-1 day');
+
+        // No session started at all.
+        $this->recite($hadith, 'انما الاعمال بالنيات')
+            ->assertOk()
+            ->assertJsonPath('data.score', 100);
+
+        $this->assertDatabaseCount('review_sessions', 0);
+    }
+
     public function test_a_session_belongs_to_its_owner_only(): void
     {
         $owner = User::factory()->create();

@@ -19,13 +19,16 @@ use Illuminate\Support\Collection;
  *  1. Pushed items (LIFO): hadiths explicitly put on the stack, the user's own
  *     requests before Gemini's / the evaluator's, newest push first.
  *  2. Reviews that are due now, earliest due date first.
- *  3. Hadiths not memorized yet from the books the user is already working in,
- *     most recent activity first, then the book's own order.
+ *  3. Hadiths the user started working on in the last couple of days and has
+ *     not recited yet — this couple of days' new material.
  *
- * Nothing here depends on a book being "selected": every active book is open to
- * every user, and a book counts as one the user works in as soon as they push a
- * hadith of it onto the stack or recite one. Layer 3 can also be scoped to one
- * book explicitly, so the app can show the queue for a book being browsed.
+ * This is a day's work, not a catalogue. A hadith whose review is scheduled for
+ * a later day is in none of the three layers, so the list is as long as the
+ * work actually waiting rather than being padded out to the requested limit.
+ *
+ * Passing a book changes layer 3 only: browsing a book the learner has not
+ * started should still offer its hadiths, so that case lists the book's
+ * unscheduled hadiths in the book's own order.
  */
 class MemorizationStackService
 {
@@ -134,7 +137,13 @@ class MemorizationStackService
         if ($entries->count() < $limit) {
             $remaining = $limit - $entries->count();
 
-            foreach ($this->unmemorized($user, $remaining, $seen, $bookId) as $hadith) {
+            // Browsing one book offers that book's material; the daily list
+            // offers only what the learner has actually started.
+            $newMaterial = $bookId !== null
+                ? $this->unmemorized($user, $remaining, $seen, $bookId)
+                : $this->recentlyStarted($user, $remaining, $seen);
+
+            foreach ($newMaterial as $hadith) {
                 $seen[$hadith->id] = true;
                 $entries->push([
                     'hadith' => $hadith,
@@ -244,6 +253,80 @@ class MemorizationStackService
 
         // Keep the due-date order the progress query produced.
         return $dueHadithIds
+            ->map(fn (int $id) => $hadiths->get($id))
+            ->filter()
+            ->values();
+    }
+
+    /**
+     * The hadiths the learner started working on in the last couple of days —
+     * pushed onto the stack or given a progress record — and has not recited
+     * yet, newest first.
+     *
+     * A hadith already booked for a later day is left out: that is settled
+     * work, and offering it again is what made a clean recitation reappear in
+     * the very next sitting.
+     *
+     * @return Collection<int,int>
+     */
+    public function recentlyStartedHadithIds(User $user): Collection
+    {
+        $days = max((int) config('athar.reviews.recent_days', 2), 1);
+        $since = Carbon::today()->subDays($days - 1)->startOfDay();
+        $endOfToday = Carbon::now()->endOfDay();
+
+        $fromProgress = UserHadithProgress::where('user_id', $user->id)
+            ->where('created_at', '>=', $since)
+            ->where('status', '!=', MemorizationStatus::Memorized->value)
+            ->where(function ($q) use ($endOfToday) {
+                $q->whereNull('next_review_at')
+                    ->orWhere('next_review_at', '<=', $endOfToday);
+            })
+            ->orderByDesc('created_at')
+            ->pluck('hadith_id');
+
+        $settled = UserHadithProgress::where('user_id', $user->id)
+            ->where(function ($q) use ($endOfToday) {
+                $q->where('status', MemorizationStatus::Memorized->value)
+                    ->orWhere('next_review_at', '>', $endOfToday);
+            })
+            ->pluck('hadith_id')
+            ->all();
+
+        $fromStack = MemorizationStackItem::where('user_id', $user->id)
+            ->whereNull('resolved_at')
+            ->where('pushed_at', '>=', $since)
+            ->when($settled !== [], fn ($q) => $q->whereNotIn('hadith_id', $settled))
+            ->orderByDesc('pushed_at')
+            ->pluck('hadith_id');
+
+        return $fromProgress->concat($fromStack)->unique()->values();
+    }
+
+    /**
+     * Layer 3 of the daily list: the recently started hadiths, as models.
+     *
+     * @param  array<int,bool>  $seen
+     * @return Collection<int,Hadith>
+     */
+    private function recentlyStarted(User $user, int $limit, array $seen): Collection
+    {
+        $ids = $this->recentlyStartedHadithIds($user)
+            ->reject(fn (int $id) => isset($seen[$id]))
+            ->take($limit)
+            ->values();
+
+        if ($ids->isEmpty()) {
+            return new Collection;
+        }
+
+        $hadiths = Hadith::whereIn('id', $ids)
+            ->where('is_active', true)
+            ->with(['book', 'narrator'])
+            ->get()
+            ->keyBy('id');
+
+        return $ids
             ->map(fn (int $id) => $hadiths->get($id))
             ->filter()
             ->values();

@@ -154,7 +154,11 @@ class GenerateExam
             return $hadith->text;
         }
 
-        $prompt = $template->prompt_template;
+        // Match on the wording only. The placeholders are part of the
+        // sentence, not the question: "اكتب الحديث الذي رواه {narrator}" asks
+        // for the matn, but the literal "narrator" inside the placeholder made
+        // it answer with the narrator's name instead.
+        $prompt = preg_replace('/\{[a-z_]+\}/i', ' ', $template->prompt_template) ?? '';
 
         if (Str::contains($prompt, ['راوي', 'الراوي', 'narrator'])) {
             return (string) $hadith->narrator?->name;

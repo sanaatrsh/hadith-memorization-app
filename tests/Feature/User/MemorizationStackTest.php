@@ -95,52 +95,39 @@ class MemorizationStackTest extends TestCase
             ->assertJsonPath('data.items', []);
     }
 
-    public function test_pushing_a_hadith_pulls_the_rest_of_its_book_into_the_queue(): void
+    public function test_the_daily_list_holds_the_pushed_hadith_and_not_the_rest_of_its_book(): void
     {
+        // The list is a day's work, not a catalogue: pushing one hadith does
+        // not drag in every other hadith of its book to pad out the limit.
         Sanctum::actingAs(User::factory()->create());
         $book = $this->makeBook(hadiths: 3);
         $pushed = $book->hadiths()->orderByDesc('sort_order')->first();
 
         $this->postJson('/api/v1/user/memorization/stack', ['hadith_id' => $pushed->id])->assertCreated();
 
-        $response = $this->getJson('/api/v1/user/memorization/stack')
+        $this->getJson('/api/v1/user/memorization/stack')
             ->assertOk()
-            ->assertJsonPath('data.total', 3)
+            ->assertJsonPath('data.total', 1)
             ->assertJsonPath('data.items.0.hadith.id', $pushed->id)
-            ->assertJsonPath('data.items.0.queue_reason', 'pushed')
-            ->assertJsonPath('data.items.1.queue_reason', 'new');
-
-        // The pushed hadith is not repeated further down the queue.
-        $ids = collect($response->json('data.items'))->pluck('hadith.id');
-        $this->assertCount(3, $ids->unique());
+            ->assertJsonPath('data.items.0.queue_reason', 'pushed');
     }
 
-    public function test_the_book_worked_on_most_recently_leads_the_new_hadiths(): void
+    public function test_browsing_one_book_still_offers_that_book_s_hadiths(): void
     {
+        // Scoping to a book is the browse case, so it may offer material the
+        // learner has not started — the daily list may not.
         Sanctum::actingAs(User::factory()->create());
+        $book = $this->makeBook(hadiths: 3);
 
-        $first = $this->makeBook(hadiths: 2);
-        $second = $this->makeBook(hadiths: 2);
+        $this->getJson("/api/v1/user/memorization/stack?book_id={$book->id}")
+            ->assertOk()
+            ->assertJsonPath('data.total', 3)
+            ->assertJsonPath('data.items.0.queue_reason', 'new');
 
-        $this->postJson('/api/v1/user/memorization/stack', [
-            'hadith_id' => $first->hadiths()->orderBy('sort_order')->first()->id,
-        ])->assertCreated();
-
-        $this->travel(1)->minutes();
-
-        $this->postJson('/api/v1/user/memorization/stack', [
-            'hadith_id' => $second->hadiths()->orderBy('sort_order')->first()->id,
-        ])->assertCreated();
-
-        $response = $this->getJson('/api/v1/user/memorization/stack')->assertOk();
-
-        $newEntries = collect($response->json('data.items'))
-            ->where('queue_reason', 'new')
-            ->values();
-
-        // The book touched last is on top of the untouched hadiths.
-        $this->assertSame($second->id, $newEntries[0]['hadith']['book_id']);
-        $this->assertSame($first->id, $newEntries[1]['hadith']['book_id']);
+        // Without the book, nothing has been started, so there is no work.
+        $this->getJson('/api/v1/user/memorization/stack')
+            ->assertOk()
+            ->assertJsonPath('data.total', 0);
     }
 
     public function test_the_queue_can_be_scoped_to_one_book(): void
@@ -226,7 +213,7 @@ class MemorizationStackTest extends TestCase
             ->assertJsonPath('data.pushed_count', 0);
     }
 
-    public function test_due_reviews_come_before_hadiths_that_were_never_started(): void
+    public function test_due_reviews_come_before_recently_started_hadiths(): void
     {
         Sanctum::actingAs($user = User::factory()->create());
         $book = $this->makeBook(hadiths: 3);
@@ -240,10 +227,23 @@ class MemorizationStackTest extends TestCase
             'next_review_at' => now()->subDay(),
         ]);
 
+        // A second hadith started today but never recited: recent material,
+        // which sits behind what is actually due.
+        $recent = $book->hadiths()->orderBy('sort_order')->first();
+        UserHadithProgress::create([
+            'user_id' => $user->id,
+            'hadith_id' => $recent->id,
+            'status' => MemorizationStatus::Memorizing->value,
+            'srs_level' => 0,
+            'next_review_at' => null,
+        ]);
+
         $this->getJson('/api/v1/user/memorization/stack')
             ->assertOk()
+            ->assertJsonPath('data.total', 2)
             ->assertJsonPath('data.items.0.hadith.id', $due->id)
             ->assertJsonPath('data.items.0.queue_reason', 'due_review')
+            ->assertJsonPath('data.items.1.hadith.id', $recent->id)
             ->assertJsonPath('data.items.1.queue_reason', 'new');
     }
 
@@ -348,8 +348,9 @@ class MemorizationStackTest extends TestCase
         // next session.
         Sanctum::actingAs($user = User::factory()->create());
         $book = $this->makeBook(hadiths: 2);
-        [$scheduled, $untouched] = $book->hadiths()->orderBy('sort_order')->get()->all();
+        [$scheduled, $stillPending] = $book->hadiths()->orderBy('sort_order')->get()->all();
 
+        // Started today and recited well: booked three days out.
         UserHadithProgress::create([
             'user_id' => $user->id,
             'hadith_id' => $scheduled->id,
@@ -358,11 +359,20 @@ class MemorizationStackTest extends TestCase
             'next_review_at' => now()->addDays(3),
         ]);
 
+        // Started today and not recited yet: still this day's work.
+        UserHadithProgress::create([
+            'user_id' => $user->id,
+            'hadith_id' => $stillPending->id,
+            'status' => MemorizationStatus::Memorizing->value,
+            'srs_level' => 0,
+            'next_review_at' => null,
+        ]);
+
         $response = $this->getJson('/api/v1/user/memorization/stack')->assertOk();
         $ids = collect($response->json('data.items'))->pluck('hadith.id');
 
         $this->assertNotContains($scheduled->id, $ids->all());
-        $this->assertContains($untouched->id, $ids->all());
+        $this->assertContains($stillPending->id, $ids->all());
     }
 
     public function test_a_hadith_whose_review_date_has_arrived_is_still_offered(): void

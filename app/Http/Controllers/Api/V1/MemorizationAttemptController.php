@@ -56,16 +56,18 @@ class MemorizationAttemptController extends Controller
             type: AttemptType::Memorization,
         );
 
-        // Record it against the review sitting when the app is running one, so
-        // the session can show what was recited and score the whole sitting.
-        if ($request->filled('review_session_id')) {
-            $session = ReviewSession::where('user_id', $user->id)
+        // Record it against the review sitting so the session can show what was
+        // recited and score the whole sitting. The app need not send the id:
+        // a learner has one sitting open at a time, so an unlabelled recitation
+        // belongs to it.
+        $session = $request->filled('review_session_id')
+            ? ReviewSession::where('user_id', $user->id)
                 ->where('status', ReviewSession::STATUS_IN_PROGRESS)
-                ->find($request->integer('review_session_id'));
+                ->find($request->integer('review_session_id'))
+            : $sessions->current($user);
 
-            if ($session !== null) {
-                $sessions->recordAttempt($session, $attempt);
-            }
+        if ($session !== null) {
+            $sessions->recordAttempt($session, $attempt);
         }
 
         return ApiResponse::success(

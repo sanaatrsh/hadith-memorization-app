@@ -266,12 +266,20 @@ class MemorizationStackService
             return new Collection;
         }
 
-        $memorizedIds = UserHadithProgress::where('user_id', $user->id)
-            ->where('status', MemorizationStatus::Memorized->value)
+        // Anything already scheduled is not pending work: a hadith recited
+        // well is booked for a later day, and pulling it back in here is what
+        // made a clean recitation reappear in the very next session. Only
+        // hadiths with no schedule at all — never started — belong in this
+        // layer; the ones whose date has arrived come from the due layer above.
+        $scheduledIds = UserHadithProgress::where('user_id', $user->id)
+            ->where(function ($q) {
+                $q->where('status', MemorizationStatus::Memorized->value)
+                    ->orWhere('next_review_at', '>', Carbon::now());
+            })
             ->pluck('hadith_id')
             ->all();
 
-        $skip = array_keys($seen + array_fill_keys($memorizedIds, true));
+        $skip = array_keys($seen + array_fill_keys($scheduledIds, true));
 
         $collected = new Collection;
 

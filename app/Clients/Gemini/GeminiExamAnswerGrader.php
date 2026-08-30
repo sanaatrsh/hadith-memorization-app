@@ -39,8 +39,20 @@ class GeminiExamAnswerGrader implements ExamAnswerGrader
           - added honorifics such as "رضي الله عنه"
           - naming one collector when the reference names several:
             "رواه مسلم" for "رواه البخاري ومسلم"
-        Mark it incorrect only when the answer names a genuinely different
-        person or source, or names no one at all.
+        Be equally firm the other way. Accepting a wrong answer is as bad as
+        rejecting a right one, so mark it incorrect whenever any of these hold,
+        no matter how confident or well-formed the answer looks:
+          - it names a different person or source: "أبو هريرة" is not
+            "أبو ذر الغفاري", and "رواه الترمذي" is not "رواه البخاري"
+          - it names someone whose name merely resembles the reference:
+            "عمر بن عبد العزيز" is not "عمر بن الخطاب", and "عمرو" is not "عمر"
+          - it is empty, a single generic word ("الله", "الراوي"), a guess
+            such as "لا أعرف", or unrelated text
+          - it answers a different question than the one asked
+        A partial answer counts only when the part given is unambiguously the
+        same person or source; "عمر" alone answers "عمر بن الخطاب" because no
+        other companion is meant, but a lone "عبد الله" does not answer
+        "عبد الله بن عمر", since it identifies no one in particular.
 
         For a recall question (complete the hadith, or recite it), the answer
         must faithfully reproduce the reference wording. A missing clause, an

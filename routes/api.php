@@ -19,7 +19,9 @@ use App\Http\Controllers\Api\V1\ReviewAttemptController;
 use App\Http\Controllers\Api\V1\SystemController;
 use App\Http\Controllers\Api\V1\User\DashboardController;
 use App\Http\Controllers\Api\V1\User\MemorizationStackController;
+use App\Http\Controllers\Api\V1\User\MemorizedHadithController;
 use App\Http\Controllers\Api\V1\User\ReviewController;
+use App\Http\Controllers\Api\V1\User\ReviewSessionController;
 use Illuminate\Support\Facades\Route;
 
 /*
@@ -67,6 +69,15 @@ Route::prefix('v1')->group(function () {
     Route::middleware(['auth:sanctum', 'active'])->prefix('user')->group(function () {
         Route::get('/progress', [DashboardController::class, 'show']);
         Route::get('/reviews/due', [ReviewController::class, 'due']);
+
+        // A review sitting: today's due hadiths, then a result at the end.
+        Route::post('/review-sessions', [ReviewSessionController::class, 'store']);
+        Route::get('/review-sessions/current', [ReviewSessionController::class, 'current']);
+        Route::get('/review-sessions/{session}', [ReviewSessionController::class, 'show']);
+        Route::post('/review-sessions/{session}/complete', [ReviewSessionController::class, 'complete']);
+
+        // "تم الحفظ" on a hadith, without reciting it.
+        Route::post('/hadiths/{hadith}/memorized', [MemorizedHadithController::class, 'store']);
 
         // Memorization stack: what to memorize next, and pushing a hadith back
         // onto the top of it.

@@ -8,6 +8,8 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\StoreMemorizationAttemptRequest;
 use App\Http\Resources\MemorizationAttemptResource;
 use App\Models\Hadith;
+use App\Models\ReviewSession;
+use App\Services\ReviewSessionService;
 use App\Support\ApiResponse;
 use OpenApi\Attributes as OA;
 
@@ -20,7 +22,9 @@ class MemorizationAttemptController extends Controller
         description: 'Compares the Flutter speech-to-text transcript with the canonical hadith. The deterministic word comparison is the authoritative score; Gemini adds structured Arabic feedback when available. '
             .'The MVP evaluates missing, extra, replaced, and reordered words only — not pronunciation, because the original audio is not submitted. '
             .'If Gemini is temporarily unavailable the request still succeeds (HTTP 200) with ai_feedback_available=false and the deterministic report. '
-            .'Duplicate client_attempt_uuid values are idempotent and return the existing attempt. Rate limited to 30 requests/minute.',
+            .'Duplicate client_attempt_uuid values are idempotent and return the existing attempt. '
+            .'Pass review_session_id to record the recitation against a review sitting. '
+            .'The response carries next_review_at: when this hadith comes up again. Rate limited to 30 requests/minute.',
         tags: ['Memorization'],
         security: [['sanctum' => []]],
         requestBody: new OA\RequestBody(required: true, content: new OA\JsonContent(ref: '#/components/schemas/MemorizationAttemptRequest')),
@@ -31,8 +35,11 @@ class MemorizationAttemptController extends Controller
             new OA\Response(response: 429, description: 'Too many requests.', content: new OA\JsonContent(ref: '#/components/schemas/RateLimitError')),
         ],
     )]
-    public function store(StoreMemorizationAttemptRequest $request, EvaluateMemorizationAttempt $action)
-    {
+    public function store(
+        StoreMemorizationAttemptRequest $request,
+        EvaluateMemorizationAttempt $action,
+        ReviewSessionService $sessions,
+    ) {
         $user = $request->user();
         $hadith = Hadith::with('narrator')->findOrFail($request->integer('hadith_id'));
 
@@ -48,6 +55,18 @@ class MemorizationAttemptController extends Controller
             recognizedText: (string) $request->input('recognized_text'),
             type: AttemptType::Memorization,
         );
+
+        // Record it against the review sitting when the app is running one, so
+        // the session can show what was recited and score the whole sitting.
+        if ($request->filled('review_session_id')) {
+            $session = ReviewSession::where('user_id', $user->id)
+                ->where('status', ReviewSession::STATUS_IN_PROGRESS)
+                ->find($request->integer('review_session_id'));
+
+            if ($session !== null) {
+                $sessions->recordAttempt($session, $attempt);
+            }
+        }
 
         return ApiResponse::success(
             new MemorizationAttemptResource($attempt),

@@ -9,6 +9,7 @@ use App\Models\Hadith;
 use App\Models\HadithAid;
 use App\Models\HadithTerm;
 use App\Models\Narrator;
+use Database\Seeders\Concerns\SeedsBookCovers;
 use Illuminate\Database\Seeder;
 
 /**
@@ -25,6 +26,8 @@ use Illuminate\Database\Seeder;
  */
 class NawawiFortySeeder extends Seeder
 {
+    use SeedsBookCovers;
+
     public function run(): void
     {
         /** @var array{book:array<string,mixed>, narrators:array<string,string>, hadiths:array<int,array<string,mixed>>} $catalogue */
@@ -34,6 +37,8 @@ class NawawiFortySeeder extends Seeder
             ['title' => $catalogue['book']['title']],
             $catalogue['book'],
         );
+
+        $this->attachCover($book);
 
         $narrators = [];
 

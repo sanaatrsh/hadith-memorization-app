@@ -9,20 +9,26 @@ use App\Models\Book;
 use App\Models\Hadith;
 use App\Models\MemorizationStackItem;
 use App\Models\UserHadithProgress;
+use App\Services\ActivityService;
 use App\Services\MemorizationStackService;
+use App\Services\ReviewSessionService;
 use App\Support\ApiResponse;
 use Illuminate\Http\Request;
 use OpenApi\Attributes as OA;
 
 class DashboardController extends Controller
 {
-    public function __construct(private readonly MemorizationStackService $stack) {}
+    public function __construct(
+        private readonly MemorizationStackService $stack,
+        private readonly ActivityService $activity,
+        private readonly ReviewSessionService $sessions,
+    ) {}
 
     #[OA\Get(
         path: '/user/progress',
         operationId: 'memorizationDashboard',
         summary: 'Get the memorization dashboard',
-        description: 'Counts across the whole catalogue (every user has every book): totals, status breakdown, pending stack size, and reviews due today. `active_books` are the books the user is working in — the ones they pushed a hadith of onto the stack or recited from.',
+        description: 'Counts across the whole catalogue (every user has every book): totals, status breakdown, pending stack size, and reviews due today. `active_books` are the books the user is working in — the ones they pushed a hadith of onto the stack or recited from. Also carries the streak (الحماسة) and a day-by-day activity heatmap, both derived from recorded attempts.',
         tags: ['Memorization'],
         security: [['sanctum' => []]],
         responses: [
@@ -69,6 +75,8 @@ class DashboardController extends Controller
             ->whereNull('resolved_at')
             ->count();
 
+        $activeDays = $this->activity->activeDays($user);
+
         return ApiResponse::success([
             'active_books' => BookResource::collection($activeBooks),
             'total_books' => $totalBooks,
@@ -78,7 +86,11 @@ class DashboardController extends Controller
             'reviewing' => $reviewing,
             'memorized' => $memorized,
             'reviews_due_today' => $reviewsDueToday,
+            'session_hadith_count' => $this->sessions->dueToday($user)->count(),
             'stack_count' => $stackCount,
+            'current_streak_days' => $this->activity->currentStreak($activeDays),
+            'longest_streak_days' => $this->activity->longestStreak($activeDays),
+            'activity' => $this->activity->heatmap($user),
             // Recent attempts are populated once the attempts module (Phase 4) exists.
             'recent_attempts' => [],
         ], 'Dashboard retrieved successfully.');

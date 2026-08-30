@@ -14,11 +14,14 @@ use App\Models\Narrator;
 use App\Models\QuestionTemplate;
 use App\Models\User;
 use App\Models\UserHadithProgress;
+use Database\Seeders\Concerns\SeedsBookCovers;
 use Illuminate\Database\Seeder;
 use Illuminate\Support\Facades\Hash;
 
 class ArabicDemoSeeder extends Seeder
 {
+    use SeedsBookCovers;
+
     /**
      * Seed a stable Arabic dataset for Swagger and local API exploration.
      *
@@ -73,6 +76,7 @@ class ArabicDemoSeeder extends Seeder
             ],
         ])->mapWithKeys(function (array $attributes): array {
             $book = Book::updateOrCreate(['title' => $attributes['title']], $attributes);
+            $this->attachCover($book);
 
             return [$attributes['title'] => $book];
         });

@@ -341,6 +341,49 @@ class MemorizationStackTest extends TestCase
         ]);
     }
 
+    public function test_a_hadith_already_scheduled_for_a_later_day_is_not_offered_as_new(): void
+    {
+        // Reciting a hadith well books it for a later day. It used to come back
+        // here as "new" work, which is how a clean recitation reappeared in the
+        // next session.
+        Sanctum::actingAs($user = User::factory()->create());
+        $book = $this->makeBook(hadiths: 2);
+        [$scheduled, $untouched] = $book->hadiths()->orderBy('sort_order')->get()->all();
+
+        UserHadithProgress::create([
+            'user_id' => $user->id,
+            'hadith_id' => $scheduled->id,
+            'status' => MemorizationStatus::Reviewing->value,
+            'srs_level' => 2,
+            'next_review_at' => now()->addDays(3),
+        ]);
+
+        $response = $this->getJson('/api/v1/user/memorization/stack')->assertOk();
+        $ids = collect($response->json('data.items'))->pluck('hadith.id');
+
+        $this->assertNotContains($scheduled->id, $ids->all());
+        $this->assertContains($untouched->id, $ids->all());
+    }
+
+    public function test_a_hadith_whose_review_date_has_arrived_is_still_offered(): void
+    {
+        Sanctum::actingAs($user = User::factory()->create());
+        $hadith = $this->makeBook(hadiths: 1)->hadiths()->first();
+
+        UserHadithProgress::create([
+            'user_id' => $user->id,
+            'hadith_id' => $hadith->id,
+            'status' => MemorizationStatus::Reviewing->value,
+            'srs_level' => 1,
+            'next_review_at' => now()->subHour(),
+        ]);
+
+        $this->getJson('/api/v1/user/memorization/stack')
+            ->assertOk()
+            ->assertJsonPath('data.items.0.hadith.id', $hadith->id)
+            ->assertJsonPath('data.items.0.queue_reason', 'due_review');
+    }
+
     public function test_the_stack_is_private_to_each_user(): void
     {
         $owner = User::factory()->create();

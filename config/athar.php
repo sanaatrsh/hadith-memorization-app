@@ -78,6 +78,19 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Review sessions
+    |--------------------------------------------------------------------------
+    | A sitting holds what is genuinely due, plus what the learner started
+    | working on in the last `recent_days` days (2 = today and yesterday) and
+    | has not recited yet. It deliberately does not hold the whole backlog of
+    | hadiths a learner has ever touched.
+    */
+    'reviews' => [
+        'recent_days' => 2,
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Exams
     |--------------------------------------------------------------------------
     | Without an explicit question_count, an exam covers the hadiths added to

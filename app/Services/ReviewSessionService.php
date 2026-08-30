@@ -2,8 +2,10 @@
 
 namespace App\Services;
 
+use App\Enums\MemorizationStatus;
 use App\Models\Hadith;
 use App\Models\MemorizationAttempt;
+use App\Models\MemorizationStackItem;
 use App\Models\ReviewSession;
 use App\Models\ReviewSessionItem;
 use App\Models\User;
@@ -16,11 +18,18 @@ use Illuminate\Support\Facades\DB;
  * One review sitting: the hadiths whose review falls due today, and the result
  * of working through them.
  *
- * "Due today" means anything scheduled up to the end of today — a hadith set
- * for later this evening belongs in today's session, and one that fell due last
- * week is overdue and belongs too. Hadiths scheduled for a future day are not
- * in it, which is the whole point: a hadith recited well is scheduled forward
- * and must not come back in the next session.
+ * The sitting holds two things and nothing else:
+ *
+ *   1. What is genuinely due — anything scheduled up to the end of today, so a
+ *      hadith set for this evening belongs in it and one that fell due last
+ *      week is overdue and belongs too.
+ *   2. What the learner started working on today or yesterday and has not
+ *      recited yet — the new material of the last couple of days.
+ *
+ * A hadith already scheduled into a future day is in neither: reciting one well
+ * books it forward, and pulling it back into the very next sitting is exactly
+ * the behaviour this avoids. That also keeps the sitting short — it is the work
+ * for today, not the backlog of everything ever touched.
  */
 class ReviewSessionService
 {
@@ -46,7 +55,7 @@ class ReviewSessionService
             return $existing->load('items.hadith');
         }
 
-        $hadiths = $this->dueToday($user);
+        $hadiths = $this->sessionHadiths($user);
 
         return DB::transaction(function () use ($user, $hadiths) {
             $session = ReviewSession::create([
@@ -67,32 +76,87 @@ class ReviewSessionService
     }
 
     /**
-     * The hadiths whose review is due by the end of today, earliest first.
+     * Everything the sitting should contain: what is due, then the recent
+     * material not yet recited. Due hadiths lead, earliest first.
      *
      * @return Collection<int,Hadith>
      */
-    public function dueToday(User $user): Collection
+    public function sessionHadiths(User $user): Collection
     {
-        $dueIds = UserHadithProgress::where('user_id', $user->id)
-            ->whereNotNull('next_review_at')
-            ->where('next_review_at', '<=', Carbon::now()->endOfDay())
-            ->orderBy('next_review_at')
-            ->pluck('hadith_id');
+        $ids = $this->dueHadithIds($user)
+            ->concat($this->recentlyStartedHadithIds($user))
+            ->unique()
+            ->values();
 
-        if ($dueIds->isEmpty()) {
+        if ($ids->isEmpty()) {
             return new Collection;
         }
 
-        $hadiths = Hadith::whereIn('id', $dueIds)
+        $hadiths = Hadith::whereIn('id', $ids)
             ->where('is_active', true)
             ->with(['book', 'narrator'])
             ->get()
             ->keyBy('id');
 
-        return $dueIds
+        return $ids
             ->map(fn (int $id) => $hadiths->get($id))
             ->filter()
             ->values();
+    }
+
+    /**
+     * Hadiths whose review date has arrived, earliest first.
+     *
+     * @return Collection<int,int>
+     */
+    private function dueHadithIds(User $user): Collection
+    {
+        return UserHadithProgress::where('user_id', $user->id)
+            ->whereNotNull('next_review_at')
+            ->where('next_review_at', '<=', Carbon::now()->endOfDay())
+            ->orderBy('next_review_at')
+            ->pluck('hadith_id');
+    }
+
+    /**
+     * Hadiths the learner started working on in the last couple of days —
+     * pushed onto the stack or given a progress record — and has not recited
+     * yet. Anything already booked for a future day is left out, so a hadith
+     * recited well today does not come straight back this evening.
+     *
+     * @return Collection<int,int>
+     */
+    private function recentlyStartedHadithIds(User $user): Collection
+    {
+        $days = max((int) config('athar.reviews.recent_days', 2), 1);
+        $since = Carbon::today()->subDays($days - 1)->startOfDay();
+
+        $fromProgress = UserHadithProgress::where('user_id', $user->id)
+            ->where('created_at', '>=', $since)
+            ->where('status', '!=', MemorizationStatus::Memorized->value)
+            ->where(function ($q) {
+                $q->whereNull('next_review_at')
+                    ->orWhere('next_review_at', '<=', Carbon::now()->endOfDay());
+            })
+            ->orderByDesc('created_at')
+            ->pluck('hadith_id');
+
+        $scheduledAhead = UserHadithProgress::where('user_id', $user->id)
+            ->where(function ($q) {
+                $q->where('status', MemorizationStatus::Memorized->value)
+                    ->orWhere('next_review_at', '>', Carbon::now()->endOfDay());
+            })
+            ->pluck('hadith_id')
+            ->all();
+
+        $fromStack = MemorizationStackItem::where('user_id', $user->id)
+            ->whereNull('resolved_at')
+            ->where('pushed_at', '>=', $since)
+            ->when($scheduledAhead !== [], fn ($q) => $q->whereNotIn('hadith_id', $scheduledAhead))
+            ->orderByDesc('pushed_at')
+            ->pluck('hadith_id');
+
+        return $fromProgress->concat($fromStack)->unique()->values();
     }
 
     /**

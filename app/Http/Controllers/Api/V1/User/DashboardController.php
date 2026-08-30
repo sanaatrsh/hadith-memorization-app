@@ -86,7 +86,7 @@ class DashboardController extends Controller
             'reviewing' => $reviewing,
             'memorized' => $memorized,
             'reviews_due_today' => $reviewsDueToday,
-            'session_hadith_count' => $this->sessions->dueToday($user)->count(),
+            'session_hadith_count' => $this->sessions->sessionHadiths($user)->count(),
             'stack_count' => $stackCount,
             'current_streak_days' => $this->activity->currentStreak($activeDays),
             'longest_streak_days' => $this->activity->longestStreak($activeDays),

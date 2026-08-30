@@ -70,19 +70,20 @@ class ReviewSessionTest extends TestCase
         ]));
     }
 
-    public function test_a_session_contains_only_the_hadiths_due_today(): void
+    public function test_a_session_holds_what_is_due_and_leaves_out_what_is_scheduled_ahead(): void
     {
         Sanctum::actingAs($user = User::factory()->create());
 
         $overdue = $this->hadith();
         $dueLaterToday = $this->hadith();
-        $dueNextWeek = $this->hadith();
-        $neverStarted = $this->hadith();
+        $scheduledAhead = $this->hadith();
+        $neverTouched = $this->hadith();
 
         $this->due($user, $overdue, '-3 days');
         $this->due($user, $dueLaterToday, '+2 hours');
-        $this->due($user, $dueNextWeek, '+7 days');
-        // $neverStarted has no progress row at all.
+        // Started today but recited well, so it is booked for a later day.
+        $this->due($user, $scheduledAhead, '+7 days');
+        // $neverTouched has no progress row and was never pushed.
 
         $response = $this->postJson('/api/v1/user/review-sessions')
             ->assertCreated()
@@ -92,8 +93,60 @@ class ReviewSessionTest extends TestCase
         $ids = collect($response->json('data.items'))->pluck('hadith_id');
 
         $this->assertEqualsCanonicalizing([$overdue->id, $dueLaterToday->id], $ids->all());
-        $this->assertNotContains($dueNextWeek->id, $ids->all());
-        $this->assertNotContains($neverStarted->id, $ids->all());
+        $this->assertNotContains($scheduledAhead->id, $ids->all());
+        $this->assertNotContains($neverTouched->id, $ids->all());
+    }
+
+    public function test_a_hadith_added_today_and_not_yet_recited_joins_the_session(): void
+    {
+        Sanctum::actingAs(User::factory()->create());
+        $hadith = $this->hadith();
+
+        // Pushing it onto the stack is how a learner "adds" a hadith; it has no
+        // review date yet, but it is this couple of days' new material.
+        $this->postJson('/api/v1/user/memorization/stack', ['hadith_id' => $hadith->id])->assertCreated();
+
+        $this->postJson('/api/v1/user/review-sessions')
+            ->assertCreated()
+            ->assertJsonPath('data.summary.total_hadiths', 1)
+            ->assertJsonPath('data.items.0.hadith_id', $hadith->id);
+    }
+
+    public function test_a_hadith_added_before_the_recent_window_does_not_join_the_session(): void
+    {
+        Sanctum::actingAs($user = User::factory()->create());
+        $old = $this->hadith();
+
+        // Started a week ago and never recited: it is backlog, not today's work,
+        // and it has no review date to make it due either.
+        $progress = UserHadithProgress::create([
+            'user_id' => $user->id,
+            'hadith_id' => $old->id,
+            'status' => MemorizationStatus::Memorizing->value,
+            'srs_level' => 0,
+            'next_review_at' => null,
+        ]);
+        $progress->forceFill(['created_at' => now()->subDays(7)])->save();
+
+        $this->postJson('/api/v1/user/review-sessions')
+            ->assertCreated()
+            ->assertJsonPath('data.summary.total_hadiths', 0);
+    }
+
+    public function test_an_overdue_hadith_from_last_week_is_still_included(): void
+    {
+        // Spaced repetition only works if the backlog of genuinely due hadiths
+        // keeps coming back, however old it is.
+        Sanctum::actingAs($user = User::factory()->create());
+        $old = $this->hadith();
+
+        $progress = $this->due($user, $old, '-9 days');
+        $progress->forceFill(['created_at' => now()->subDays(30)])->save();
+
+        $this->postJson('/api/v1/user/review-sessions')
+            ->assertCreated()
+            ->assertJsonPath('data.summary.total_hadiths', 1)
+            ->assertJsonPath('data.items.0.hadith_id', $old->id);
     }
 
     public function test_the_overdue_hadith_comes_before_the_one_due_later_today(): void

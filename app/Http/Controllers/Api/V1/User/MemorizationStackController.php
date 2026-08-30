@@ -28,7 +28,7 @@ class MemorizationStackController extends Controller
         tags: ['Memorization'],
         security: [['sanctum' => []]],
         parameters: [
-            new OA\Parameter(name: 'limit', in: 'query', required: false, description: 'How many entries to return (1-100, default 20).', schema: new OA\Schema(type: 'integer', example: 20)),
+            new OA\Parameter(name: 'limit', in: 'query', required: false, description: 'How many entries to return (1-100, default 5).', schema: new OA\Schema(type: 'integer', example: 5)),
             new OA\Parameter(name: 'book_id', in: 'query', required: false, description: 'Scope the queue to one book.', schema: new OA\Schema(type: 'integer', example: 2)),
         ],
         responses: [
@@ -45,7 +45,7 @@ class MemorizationStackController extends Controller
     )]
     public function index(Request $request)
     {
-        $limit = max(1, min((int) $request->integer('limit', 20) ?: 20, 100));
+        $limit = max(1, min((int) $request->integer('limit', 5) ?: 5, 100));
         $bookId = $request->filled('book_id') ? $request->integer('book_id') : null;
 
         $queue = $this->stack->queue($request->user(), $limit, $bookId);

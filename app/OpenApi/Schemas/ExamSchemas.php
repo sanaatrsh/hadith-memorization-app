@@ -71,6 +71,21 @@ use OpenApi\Attributes as OA;
     type: 'object',
 )]
 #[OA\Schema(
+    schema: 'CompleteExamRequest',
+    description: 'Optional body for completing an exam. Submit every answer at once instead of one at a time; both key namings are accepted.',
+    properties: [
+        new OA\Property(
+            property: 'answers',
+            type: 'array',
+            items: new OA\Items(properties: [
+                new OA\Property(property: 'question_id', description: 'The exam question id. `exam_question_id` is accepted too.', type: 'integer', example: 112),
+                new OA\Property(property: 'answer', description: "The learner's typed answer. `answer_text` is accepted too.", type: 'string', example: 'أبو هريرة'),
+            ], type: 'object'),
+        ),
+    ],
+    type: 'object',
+)]
+#[OA\Schema(
     schema: 'ExamAnswerResult',
     description: 'Acknowledgement only — the score and the correct answer are released when the exam is completed.',
     properties: [

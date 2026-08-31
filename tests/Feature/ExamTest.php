@@ -332,6 +332,89 @@ class ExamTest extends TestCase
             ->assertJsonPath('data.summary.unanswered_count', 1);
     }
 
+    public function test_all_answers_can_be_submitted_with_the_completion_request(): void
+    {
+        // How the Flutter app submits: one POST to /complete carrying every
+        // answer, keyed question_id / answer.
+        Sanctum::actingAs(User::factory()->create());
+        $book = $this->setupBook(hadiths: 2);
+        QuestionTemplate::factory()->narrator()->create();
+
+        $examId = $this->postJson('/api/v1/exams', ['book_id' => $book->id])->json('data.id');
+        $questions = $this->getJson("/api/v1/exams/{$examId}")->json('data.questions');
+
+        $this->postJson("/api/v1/exams/{$examId}/complete", [
+            'answers' => [
+                ['question_id' => $questions[0]['id'], 'answer' => 'عمر بن الخطاب'],
+                ['question_id' => $questions[1]['id'], 'answer' => 'أبو هريرة'],
+            ],
+        ])
+            ->assertOk()
+            ->assertJsonPath('data.status', 'completed')
+            ->assertJsonPath('data.score', 50)
+            ->assertJsonPath('data.summary.answered_count', 2)
+            ->assertJsonPath('data.summary.unanswered_count', 0)
+            ->assertJsonPath('data.summary.correct_count', 1)
+            ->assertJsonPath('data.questions.0.is_correct', true)
+            ->assertJsonPath('data.questions.1.is_correct', false);
+
+        $this->assertDatabaseCount('exam_answers', 2);
+    }
+
+    public function test_the_canonical_key_names_are_accepted_on_completion_too(): void
+    {
+        Sanctum::actingAs(User::factory()->create());
+        $book = $this->setupBook(hadiths: 1);
+        QuestionTemplate::factory()->narrator()->create();
+
+        $examId = $this->postJson('/api/v1/exams', ['book_id' => $book->id])->json('data.id');
+        $questionId = $this->getJson("/api/v1/exams/{$examId}")->json('data.questions.0.id');
+
+        $this->postJson("/api/v1/exams/{$examId}/complete", [
+            'answers' => [
+                ['exam_question_id' => $questionId, 'answer_text' => 'عمر بن الخطاب'],
+            ],
+        ])
+            ->assertOk()
+            ->assertJsonPath('data.score', 100);
+    }
+
+    public function test_an_answer_naming_a_question_outside_the_exam_is_refused(): void
+    {
+        // Dropping it silently would look exactly like a wrong grade, which is
+        // the failure this whole flow was stuck on.
+        Sanctum::actingAs(User::factory()->create());
+        $book = $this->setupBook(hadiths: 1);
+        QuestionTemplate::factory()->narrator()->create();
+
+        $examId = $this->postJson('/api/v1/exams', ['book_id' => $book->id])->json('data.id');
+
+        $this->postJson("/api/v1/exams/{$examId}/complete", [
+            'answers' => [
+                ['question_id' => 99999, 'answer' => 'عمر بن الخطاب'],
+            ],
+        ])->assertStatus(422);
+
+        // The exam is untouched: nothing graded, nothing finalized.
+        $this->assertDatabaseHas('exams', ['id' => $examId, 'status' => 'in_progress']);
+        $this->assertDatabaseCount('exam_answers', 0);
+    }
+
+    public function test_completing_without_a_body_still_works(): void
+    {
+        Sanctum::actingAs(User::factory()->create());
+        $book = $this->setupBook(hadiths: 1);
+        QuestionTemplate::factory()->narrator()->create();
+
+        $examId = $this->postJson('/api/v1/exams', ['book_id' => $book->id])->json('data.id');
+
+        $this->postJson("/api/v1/exams/{$examId}/complete")
+            ->assertOk()
+            ->assertJsonPath('data.status', 'completed')
+            ->assertJsonPath('data.score', 0)
+            ->assertJsonPath('data.summary.unanswered_count', 1);
+    }
+
     public function test_user_cannot_access_another_users_exam(): void
     {
         $owner = User::factory()->create();

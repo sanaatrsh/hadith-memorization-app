@@ -8,6 +8,7 @@ use App\Models\Hadith;
 use App\Models\User;
 use App\Models\UserHadithProgress;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Str;
 use Illuminate\Testing\TestResponse;
@@ -72,6 +73,10 @@ class ReviewSessionTest extends TestCase
 
     public function test_a_session_holds_what_is_due_and_leaves_out_what_is_scheduled_ahead(): void
     {
+        // Frozen mid-morning: "later today" has to stay inside today, which it
+        // would not if the suite happened to run late in the evening.
+        $this->travelTo(Carbon::today()->addHours(9));
+
         Sanctum::actingAs($user = User::factory()->create());
 
         $overdue = $this->hadith();
@@ -151,6 +156,8 @@ class ReviewSessionTest extends TestCase
 
     public function test_the_overdue_hadith_comes_before_the_one_due_later_today(): void
     {
+        $this->travelTo(Carbon::today()->addHours(9));
+
         Sanctum::actingAs($user = User::factory()->create());
 
         $later = $this->hadith();

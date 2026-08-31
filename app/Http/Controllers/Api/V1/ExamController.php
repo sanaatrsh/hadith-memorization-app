@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api\V1;
 
 use App\Actions\Exam\GenerateExam;
 use App\Http\Controllers\Controller;
+use App\Http\Requests\CompleteExamRequest;
 use App\Http\Requests\StoreExamAnswerRequest;
 use App\Http\Requests\StoreExamRequest;
 use App\Http\Resources\ExamResource;
@@ -13,7 +14,9 @@ use App\Models\ExamAnswer;
 use App\Models\ExamQuestion;
 use App\Services\ExamAnswerEvaluator;
 use App\Support\ApiResponse;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Collection;
 use OpenApi\Attributes as OA;
 
 class ExamController extends Controller
@@ -165,10 +168,12 @@ class ExamController extends Controller
         path: '/exams/{exam}/complete',
         operationId: 'completeExam',
         summary: 'Complete an exam and compute the final score',
-        description: 'Finalizes the exam and releases the results: the overall score (the average over all questions, unanswered ones counting as zero) plus, for every question, its score and the correct answer.',
+        description: 'Finalizes the exam and releases the results: the overall score (the average over all questions, unanswered ones counting as zero) plus, for every question, its score and the correct answer. '
+            .'The whole set of answers may be submitted with this request instead of one at a time — pass `answers` as a list of {question_id, answer} (or {exam_question_id, answer_text}); they are graded before the exam is finalized. Every id must belong to this exam, so a mistyped id fails loudly rather than being dropped.',
         tags: ['Exams'],
         security: [['sanctum' => []]],
         parameters: [new OA\Parameter(name: 'exam', in: 'path', required: true, schema: new OA\Schema(type: 'integer'))],
+        requestBody: new OA\RequestBody(required: false, content: new OA\JsonContent(ref: '#/components/schemas/CompleteExamRequest')),
         responses: [
             new OA\Response(response: 200, description: 'Exam completed.', content: new OA\JsonContent(properties: [
                 new OA\Property(property: 'success', type: 'boolean', example: true),
@@ -176,16 +181,24 @@ class ExamController extends Controller
             ], type: 'object')),
             new OA\Response(response: 401, description: 'Unauthenticated.', content: new OA\JsonContent(ref: '#/components/schemas/UnauthenticatedError')),
             new OA\Response(response: 403, description: 'Exam belongs to another user.', content: new OA\JsonContent(ref: '#/components/schemas/ForbiddenError')),
-            new OA\Response(response: 422, description: 'Exam already completed.', content: new OA\JsonContent(ref: '#/components/schemas/ValidationError')),
+            new OA\Response(response: 422, description: 'Exam already completed, or an answer names a question outside this exam.', content: new OA\JsonContent(ref: '#/components/schemas/ValidationError')),
         ],
     )]
-    public function complete(Exam $exam)
+    public function complete(CompleteExamRequest $request, Exam $exam, ExamAnswerEvaluator $evaluator)
     {
         $this->authorizeExam($exam);
 
         abort_unless($exam->status === 'in_progress', 422, 'This exam is already completed.');
 
         $questionIds = $exam->questions()->pluck('id');
+
+        if ($submitted = $request->answers()) {
+            $error = $this->gradeSubmittedAnswers($exam, $questionIds, $submitted, $evaluator);
+
+            if ($error !== null) {
+                return $error;
+            }
+        }
         $scores = ExamAnswer::whereIn('exam_question_id', $questionIds)->pluck('score');
 
         // Unanswered questions count as zero so the score always reflects the
@@ -202,6 +215,53 @@ class ExamController extends Controller
         $exam->load(['questions.answer', 'book']);
 
         return ApiResponse::success(new ExamResource($exam), 'Exam completed successfully.');
+    }
+
+    /**
+     * Grade a whole set of answers submitted with the completion request.
+     *
+     * An id that does not belong to this exam is refused rather than skipped:
+     * silently dropping an answer is indistinguishable, from the app's side,
+     * from a wrong grade.
+     *
+     * @param  Collection<int,int>  $questionIds
+     * @param  array<int,array{exam_question_id:int, answer_text:string}>  $submitted
+     */
+    private function gradeSubmittedAnswers(Exam $exam, $questionIds, array $submitted, ExamAnswerEvaluator $evaluator): ?JsonResponse
+    {
+        $unknown = collect($submitted)
+            ->pluck('exam_question_id')
+            ->reject(fn (int $id) => $questionIds->contains($id))
+            ->unique()
+            ->values();
+
+        if ($unknown->isNotEmpty()) {
+            return ApiResponse::error(
+                'These questions do not belong to this exam: '.$unknown->implode(', ').'.',
+                422,
+            );
+        }
+
+        $questions = $exam->questions()->get()->keyBy('id');
+
+        foreach ($submitted as $answer) {
+            /** @var ExamQuestion $question */
+            $question = $questions[$answer['exam_question_id']];
+
+            $result = $evaluator->evaluate($question, $answer['answer_text']);
+
+            ExamAnswer::updateOrCreate(
+                ['exam_question_id' => $question->id],
+                [
+                    'answer_text' => $answer['answer_text'],
+                    'score' => $result['score'],
+                    'is_correct' => $result['is_correct'],
+                    'evaluation_report' => $result['report'],
+                ]
+            );
+        }
+
+        return null;
     }
 
     private function authorizeExam(Exam $exam): void

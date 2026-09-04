@@ -16,6 +16,7 @@ class Hadith extends Model implements HasMedia
 
     protected $fillable = [
         'book_id',
+        'number_in_book',
         'narrator_id',
         'title',
         'intro',
@@ -30,7 +31,25 @@ class Hadith extends Model implements HasMedia
         return [
             'is_active' => 'boolean',
             'sort_order' => 'integer',
+            'number_in_book' => 'integer',
         ];
+    }
+
+    /**
+     * A hadith always carries its number inside its own collection, so the app
+     * can say "الحديث الرابع من الأربعين النووية" and an exam can refer to it
+     * without leaking the row id. Left unset, it continues the book's
+     * numbering.
+     */
+    protected static function booted(): void
+    {
+        static::creating(function (self $hadith): void {
+            if ($hadith->number_in_book !== null || $hadith->book_id === null) {
+                return;
+            }
+
+            $hadith->number_in_book = 1 + (int) static::where('book_id', $hadith->book_id)->max('number_in_book');
+        });
     }
 
     public function book(): BelongsTo

@@ -5,25 +5,33 @@ declare(strict_types=1);
 /**
  * The Arabic question bank and two worked exams over "الأربعون النووية".
  *
- * Templates use the placeholders GenerateExam understands: {title}, {source},
- * {narrator} and {opening}. Their wording also decides the answer the runtime
- * derives (a prompt containing «راوي» is answered by the narrator, one containing
- * «مصدر» by the takhrij, anything else by the matn), so `answer_from` below is
- * kept in step with that rule.
+ * The bank holds wordings only. A question asks about "هذا الحديث" and never
+ * names one, because a question row is shared by every hadith it is asked
+ * about — which hadith an item is about is stored on the item, alongside that
+ * hadith's own reference answer. That is the one-to-many between questions and
+ * answers, and it is why each entry below lists several `answers` under a
+ * single `template`.
+ *
+ * The wording still decides the answer the runtime derives: a prompt
+ * containing «راوي» is answered by the narrator, one containing «مصدر» by the
+ * takhrij, one containing «مقدمة» by the intro line, anything else by the matn.
  *
  * `submitted` is what the learner typed or recited — deliberately imperfect in
- * places. The seeder never invents a score: it runs those answers through the
- * real ExamAnswerEvaluator, so every score and report matches what the API
- * would have produced.
+ * places, and null for an item they have not reached yet. The seeder never
+ * invents a score: it runs those answers through the real ExamAnswerEvaluator,
+ * so every score and report matches what the API would have produced.
+ *
+ * Each book has one exam per learner, so the two exams below belong to two
+ * different learners rather than piling up on the same book.
  *
  * @return array{
  *     book:string,
  *     templates: array<int, array{type:string, prompt:string}>,
  *     exams: array<int, array{
- *         status:string, started_days_ago:int, completed_days_ago:int|null,
+ *         learner:string, status:string, started_days_ago:int, completed_days_ago:int|null,
  *         questions: array<int, array{
- *             template:string, hadith:string,
- *             answer_from:'narrator'|'source'|'text', submitted:string|null
+ *             template:string,
+ *             answers: array<int, array{hadith:string, submitted:string|null}>
  *         }>
  *     }>
  * }
@@ -35,99 +43,110 @@ return [
         // Factual — the narrator. The word «راوي» must appear so the derived
         // answer is the companion's name and not the matn.
         ['type' => 'written', 'prompt' => 'من هو راوي هذا الحديث؟'],
-        ['type' => 'written', 'prompt' => 'اذكر اسم راوي الحديث الذي عنوانه: {title}'],
-        ['type' => 'written', 'prompt' => 'من راوي الحديث الذي مطلعه: {opening}'],
+        ['type' => 'written', 'prompt' => 'اذكر اسم راوي هذا الحديث.'],
 
         // Factual — the takhrij. Keyed on the word «مصدر».
+        ['type' => 'written', 'prompt' => 'ما مصدر تخريج هذا الحديث؟'],
         ['type' => 'written', 'prompt' => 'ما مصدر هذا الحديث؟'],
-        ['type' => 'written', 'prompt' => 'ما مصدر تخريج الحديث الذي عنوانه: {title}؟'],
+
+        // Factual — the isnad/context line. Keyed on the word «مقدمة».
+        ['type' => 'written', 'prompt' => 'اذكر مقدمة هذا الحديث.'],
 
         // Recall — answered by the full matn and scored word by word.
-        ['type' => 'written', 'prompt' => 'أكمل الحديث الذي يبدأ بـ: {opening}'],
-        ['type' => 'written', 'prompt' => 'اكتب نص الحديث الذي عنوانه: {title} كاملا'],
-        ['type' => 'written', 'prompt' => 'اكتب الحديث الذي رواه {narrator} وعنوانه: {title}'],
+        ['type' => 'written', 'prompt' => 'أكمل نص هذا الحديث.'],
+        ['type' => 'written', 'prompt' => 'اكتب نص هذا الحديث كاملا.'],
 
         // Recitation.
-        ['type' => 'voice', 'prompt' => 'اذكر الحديث كاملا من عنوانه: {title}'],
-        ['type' => 'voice', 'prompt' => 'سمع من حفظك الحديث الذي عنوانه: {title}'],
-        ['type' => 'voice', 'prompt' => 'اتل الحديث الذي يبدأ بـ: {opening} تلاوة كاملة'],
+        ['type' => 'voice', 'prompt' => 'اتل هذا الحديث من حفظك.'],
+        ['type' => 'voice', 'prompt' => 'سمّع هذا الحديث كاملا من حفظك.'],
     ],
 
     'exams' => [
-        // A finished exam: two flawless factual answers, two near-perfect
-        // recitations, and one recall that falls under the passing mark.
+        // A finished exam: three flawless factual answers and two recall
+        // answers, one of which falls under the passing mark.
         [
+            'learner' => 'primary',
             'status' => 'completed',
             'started_days_ago' => 3,
             'completed_days_ago' => 3,
             'questions' => [
                 [
-                    'template' => 'اذكر اسم راوي الحديث الذي عنوانه: {title}',
-                    'hadith' => 'إنما الأعمال بالنيات',
-                    'answer_from' => 'narrator',
-                    'submitted' => 'عمر بن الخطاب',
+                    // One wording, two hadiths, two different correct answers.
+                    'template' => 'من هو راوي هذا الحديث؟',
+                    'answers' => [
+                        [
+                            'hadith' => 'إنما الأعمال بالنيات',
+                            'submitted' => 'عمر بن الخطاب',
+                        ],
+                        [
+                            // The fuller lineage of «تميم الداري».
+                            'hadith' => 'الدين النصيحة',
+                            'submitted' => 'تميم بن أوس الداري',
+                        ],
+                    ],
                 ],
                 [
-                    'template' => 'ما مصدر تخريج الحديث الذي عنوانه: {title}؟',
-                    'hadith' => 'الدين النصيحة',
-                    'answer_from' => 'source',
-                    'submitted' => 'رواه مسلم',
+                    'template' => 'ما مصدر تخريج هذا الحديث؟',
+                    'answers' => [
+                        [
+                            'hadith' => 'لا تغضب',
+                            'submitted' => 'رواه البخاري',
+                        ],
+                    ],
                 ],
                 [
-                    // «ليصمت» recalled as «يسكت» — one substitution.
-                    'template' => 'أكمل الحديث الذي يبدأ بـ: {opening}',
-                    'hadith' => 'من كان يؤمن بالله واليوم الآخر',
-                    'answer_from' => 'text',
-                    'submitted' => 'من كان يؤمن بالله واليوم الآخر فليقل خيرا أو يسكت، ومن كان يؤمن بالله واليوم الآخر فليكرم جاره، ومن كان يؤمن بالله واليوم الآخر فليكرم ضيفه',
-                ],
-                [
-                    // «شهادة» dropped from the recitation.
-                    'template' => 'اذكر الحديث كاملا من عنوانه: {title}',
-                    'hadith' => 'بني الإسلام على خمس',
-                    'answer_from' => 'text',
-                    'submitted' => 'بني الإسلام على خمس: أن لا إله إلا الله وأن محمدا رسول الله، وإقام الصلاة، وإيتاء الزكاة، وحج البيت، وصوم رمضان',
-                ],
-                [
-                    // «رضي الله عنهما» and «وخذ من صحتك لمرضك» both missing.
-                    'template' => 'اكتب نص الحديث الذي عنوانه: {title} كاملا',
-                    'hadith' => 'كن في الدنيا كأنك غريب',
-                    'answer_from' => 'text',
-                    'submitted' => 'أخذ رسول الله صلى الله عليه وسلم بمنكبي فقال: كن في الدنيا كأنك غريب أو عابر سبيل. وكان ابن عمر يقول: إذا أمسيت فلا تنتظر الصباح، وإذا أصبحت فلا تنتظر المساء، ومن حياتك لموتك',
+                    'template' => 'أكمل نص هذا الحديث.',
+                    'answers' => [
+                        [
+                            // «ليصمت» recalled as «يسكت» — one substitution.
+                            'hadith' => 'من كان يؤمن بالله واليوم الآخر',
+                            'submitted' => 'من كان يؤمن بالله واليوم الآخر فليقل خيرا أو يسكت، ومن كان يؤمن بالله واليوم الآخر فليكرم جاره، ومن كان يؤمن بالله واليوم الآخر فليكرم ضيفه',
+                        ],
+                        [
+                            // «رضي الله عنهما» and «وخذ من صحتك لمرضك» both missing.
+                            'hadith' => 'كن في الدنيا كأنك غريب',
+                            'submitted' => 'أخذ رسول الله صلى الله عليه وسلم بمنكبي فقال: كن في الدنيا كأنك غريب أو عابر سبيل. وكان ابن عمر يقول: إذا أمسيت فلا تنتظر الصباح، وإذا أصبحت فلا تنتظر المساء، ومن حياتك لموتك',
+                        ],
+                    ],
                 ],
             ],
         ],
 
-        // An exam still under way: the first two questions are answered, the
-        // recitation and the last factual question are still open.
+        // An exam still under way: one item of each question is answered, the
+        // other is still open — which is what an unfinished exam looks like
+        // once items, not questions, are what get answered.
         [
+            'learner' => 'secondary',
             'status' => 'in_progress',
             'started_days_ago' => 0,
             'completed_days_ago' => null,
             'questions' => [
                 [
-                    'template' => 'من راوي الحديث الذي مطلعه: {opening}',
-                    'hadith' => 'لا ضرر ولا ضرار',
-                    'answer_from' => 'narrator',
-                    'submitted' => 'أبو سعيد الخدري',
+                    'template' => 'اذكر اسم راوي هذا الحديث.',
+                    'answers' => [
+                        [
+                            'hadith' => 'لا ضرر ولا ضرار',
+                            'submitted' => 'أبو سعيد الخدري',
+                        ],
+                        [
+                            'hadith' => 'اتق الله حيثما كنت',
+                            'submitted' => null,
+                        ],
+                    ],
                 ],
                 [
-                    // «ولرسوله» missing from the chain of five.
-                    'template' => 'اكتب الحديث الذي رواه {narrator} وعنوانه: {title}',
-                    'hadith' => 'الدين النصيحة',
-                    'answer_from' => 'text',
-                    'submitted' => 'الدين النصيحة. قلنا: لمن؟ قال: لله ولكتابه ولأئمة المسلمين وعامتهم',
-                ],
-                [
-                    'template' => 'سمع من حفظك الحديث الذي عنوانه: {title}',
-                    'hadith' => 'احفظ الله يحفظك',
-                    'answer_from' => 'text',
-                    'submitted' => null,
-                ],
-                [
-                    'template' => 'ما مصدر هذا الحديث؟',
-                    'hadith' => 'اتق الله حيثما كنت',
-                    'answer_from' => 'source',
-                    'submitted' => null,
+                    'template' => 'اتل هذا الحديث من حفظك.',
+                    'answers' => [
+                        [
+                            // «ولرسوله» missing from the chain of five.
+                            'hadith' => 'الدين النصيحة',
+                            'submitted' => 'الدين النصيحة. قلنا: لمن؟ قال: لله ولكتابه ولأئمة المسلمين وعامتهم',
+                        ],
+                        [
+                            'hadith' => 'احفظ الله يحفظك',
+                            'submitted' => null,
+                        ],
+                    ],
                 ],
             ],
         ],

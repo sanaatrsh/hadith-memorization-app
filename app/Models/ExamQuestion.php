@@ -6,19 +6,25 @@ use App\Enums\ExamQuestionType;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
-use Illuminate\Database\Eloquent\Relations\HasOne;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
+/**
+ * One question of an exam, stored once for its wording only — «من هو راوي هذا
+ * الحديث؟», «أكمل نص هذا الحديث», «اتل هذا الحديث من حفظك».
+ *
+ * The wording carries no hadith: which hadiths it is asked about, and the
+ * reference answer for each of them, live on its answers. That is what makes
+ * the relationship one-to-many.
+ */
 class ExamQuestion extends Model
 {
     use HasFactory;
 
     protected $fillable = [
         'exam_id',
-        'hadith_id',
         'question_template_id',
         'type',
         'question_text',
-        'correct_answer',
         'sort_order',
     ];
 
@@ -35,13 +41,12 @@ class ExamQuestion extends Model
         return $this->belongsTo(Exam::class);
     }
 
-    public function hadith(): BelongsTo
+    /**
+     * One row per hadith this question is asked about: the reference answer
+     * for that hadith plus whatever the learner submitted for it.
+     */
+    public function answers(): HasMany
     {
-        return $this->belongsTo(Hadith::class);
-    }
-
-    public function answer(): HasOne
-    {
-        return $this->hasOne(ExamAnswer::class);
+        return $this->hasMany(ExamAnswer::class)->orderBy('sort_order')->orderBy('id');
     }
 }

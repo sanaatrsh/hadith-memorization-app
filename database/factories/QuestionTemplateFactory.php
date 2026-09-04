@@ -7,6 +7,9 @@ use App\Models\QuestionTemplate;
 use Illuminate\Database\Eloquent\Factories\Factory;
 
 /**
+ * A question's wording is shared by every hadith it is asked about, so it
+ * names none of them: which hadith an item is about travels with the item.
+ *
  * @extends Factory<QuestionTemplate>
  */
 class QuestionTemplateFactory extends Factory
@@ -17,7 +20,7 @@ class QuestionTemplateFactory extends Factory
     {
         return [
             'type' => ExamQuestionType::Written,
-            'prompt_template' => 'أكمل الحديث الذي يبدأ بـ: {opening}',
+            'prompt_template' => 'أكمل نص هذا الحديث.',
             'is_active' => true,
         ];
     }
@@ -26,7 +29,7 @@ class QuestionTemplateFactory extends Factory
     {
         return $this->state(fn () => [
             'type' => ExamQuestionType::Voice,
-            'prompt_template' => 'اذكر الحديث كاملاً من عنوانه: {title}',
+            'prompt_template' => 'اتل هذا الحديث من حفظك.',
         ]);
     }
 

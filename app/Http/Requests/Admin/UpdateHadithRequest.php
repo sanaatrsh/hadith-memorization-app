@@ -23,6 +23,9 @@ class UpdateHadithRequest extends FormRequest
             'source' => ['nullable', 'string', 'max:255'],
             'is_active' => ['sometimes', 'boolean'],
             'sort_order' => ['sometimes', 'integer', 'min:0'],
+            // The hadith's number inside its book. Left out, it continues
+            // the book's numbering; it must stay unique within the book.
+            'number_in_book' => ['sometimes', 'nullable', 'integer', 'min:1'],
         ];
     }
 }

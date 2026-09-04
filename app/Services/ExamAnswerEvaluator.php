@@ -5,7 +5,7 @@ namespace App\Services;
 use App\Contracts\Ai\ExamAnswerGrader;
 use App\Data\Ai\ExamAnswerGradeData;
 use App\Enums\ExamQuestionType;
-use App\Models\ExamQuestion;
+use App\Models\ExamAnswer;
 use Illuminate\Support\Facades\Log;
 
 /**
@@ -33,19 +33,39 @@ class ExamAnswerEvaluator
     ) {}
 
     /**
+     * Grades one exam item.
+     *
+     * The reference answer lives on the item, not on the question: the same
+     * question is asked about several hadiths and each of them has its own
+     * correct answer.
+     *
      * @return array{score:int, is_correct:bool, report:array<string,mixed>}
      */
-    public function evaluate(ExamQuestion $question, string $answerText): array
+    public function evaluate(ExamAnswer $item, string $answerText): array
     {
-        $correct = (string) ($question->correct_answer ?? '');
-        $isFactual = $question->type === ExamQuestionType::Written && $this->isFactual($correct);
+        $question = $item->question;
+
+        return $this->evaluateAnswer(
+            (string) $question?->question_text,
+            $question?->type ?? ExamQuestionType::Written,
+            (string) ($item->correct_answer ?? ''),
+            $answerText,
+        );
+    }
+
+    /**
+     * @return array{score:int, is_correct:bool, report:array<string,mixed>}
+     */
+    public function evaluateAnswer(string $questionText, ExamQuestionType $type, string $correct, string $answerText): array
+    {
+        $isFactual = $type === ExamQuestionType::Written && $this->isFactual($correct);
 
         if (trim($answerText) === '' || trim($correct) === '') {
             return $this->fallback($correct, $answerText, $isFactual);
         }
 
         $grade = $this->grader->grade([
-            'question_text' => $question->question_text,
+            'question_text' => $questionText,
             'correct_answer' => $correct,
             'answer_text' => $answerText,
             'question_kind' => $isFactual ? 'factual' : 'recall',

@@ -89,6 +89,9 @@ class ArabicDemoSeeder extends Seeder
                 'title' => 'إنما الأعمال بالنيات',
                 'text' => 'إنما الأعمال بالنيات وإنما لكل امرئ ما نوى',
                 'source' => 'صحيح البخاري وصحيح مسلم',
+                // Its number in الأربعون النووية, which NawawiFortySeeder
+                // later fills the rest of — so the two agree.
+                'number' => 1,
                 'sort_order' => 1,
                 'terms' => [
                     ['term' => 'النيات', 'explanation' => 'المقاصد التي يقصدها الإنسان بعمله.'],
@@ -104,6 +107,7 @@ class ArabicDemoSeeder extends Seeder
                 'title' => 'من كان يؤمن بالله واليوم الآخر',
                 'text' => 'من كان يؤمن بالله واليوم الآخر فليقل خيرا أو ليصمت',
                 'source' => 'صحيح البخاري وصحيح مسلم',
+                'number' => 15,
                 'sort_order' => 2,
                 'terms' => [
                     ['term' => 'فليقل', 'explanation' => 'لام الأمر؛ أي ليقل قولاً حسناً.'],
@@ -119,6 +123,7 @@ class ArabicDemoSeeder extends Seeder
                 'title' => 'لا يؤمن أحدكم حتى يحب لأخيه',
                 'text' => 'لا يؤمن أحدكم حتى يحب لأخيه ما يحب لنفسه',
                 'source' => 'صحيح البخاري وصحيح مسلم',
+                'number' => 1,
                 'sort_order' => 1,
                 'terms' => [
                     ['term' => 'لأخيه', 'explanation' => 'لأخيه في الإسلام.'],
@@ -134,6 +139,7 @@ class ArabicDemoSeeder extends Seeder
                 'title' => 'المسلم من سلم المسلمون',
                 'text' => 'المسلم من سلم المسلمون من لسانه ويده',
                 'source' => 'صحيح البخاري وصحيح مسلم',
+                'number' => 2,
                 'sort_order' => 2,
                 'terms' => [
                     ['term' => 'سلم', 'explanation' => 'أمن ونجا من الأذى.'],
@@ -155,6 +161,7 @@ class ArabicDemoSeeder extends Seeder
                     'text' => $attributes['text'],
                     'source' => $attributes['source'],
                     'is_active' => true,
+                    'number_in_book' => $attributes['number'],
                     'sort_order' => $attributes['sort_order'],
                 ],
             );
@@ -179,8 +186,8 @@ class ArabicDemoSeeder extends Seeder
         foreach ([
             ['type' => 'written', 'prompt_template' => 'من هو راوي هذا الحديث؟'],
             ['type' => 'written', 'prompt_template' => 'ما مصدر هذا الحديث؟'],
-            ['type' => 'written', 'prompt_template' => 'أكمل الحديث الذي يبدأ بـ: {opening}'],
-            ['type' => 'voice', 'prompt_template' => 'اذكر الحديث كاملا من عنوانه: {title}'],
+            ['type' => 'written', 'prompt_template' => 'أكمل نص هذا الحديث.'],
+            ['type' => 'voice', 'prompt_template' => 'اتل هذا الحديث من حفظك.'],
         ] as $template) {
             QuestionTemplate::updateOrCreate(
                 ['prompt_template' => $template['prompt_template']],

@@ -61,7 +61,9 @@ class NawawiFortySeeder extends Seeder
                     'text' => $entry['text'],
                     'source' => $entry['source'],
                     'is_active' => true,
-                    // The collection is numbered, so its own numbering is the order.
+                    // The collection is numbered, so its own numbering is
+                    // both the published number and the order.
+                    'number_in_book' => $entry['number'],
                     'sort_order' => $entry['number'],
                 ],
             );

@@ -54,6 +54,7 @@ use OpenApi\Attributes as OA;
     properties: [
         new OA\Property(property: 'id', type: 'integer', example: 18),
         new OA\Property(property: 'book_id', type: 'integer', example: 2),
+        new OA\Property(property: 'number_in_book', description: "The hadith's number inside its own collection — unique within the book, and what the app displays. Row id 100 may be hadith 4 of الأربعون النووية.", type: 'integer', nullable: true, example: 4),
         new OA\Property(property: 'narrator_id', type: 'integer', nullable: true, example: 3),
         new OA\Property(property: 'title', type: 'string', example: 'إنما الأعمال بالنيات'),
         new OA\Property(property: 'intro', description: 'مقدمة الحديث — the isnad/context line the hadith opens with.', type: 'string', nullable: true, example: 'عن عمر بن الخطاب رضي الله عنه قال'),

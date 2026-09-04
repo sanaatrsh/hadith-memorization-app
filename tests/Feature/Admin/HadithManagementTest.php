@@ -57,6 +57,43 @@ class HadithManagementTest extends TestCase
         ]);
     }
 
+    public function test_a_hadith_is_numbered_inside_its_own_book(): void
+    {
+        // The row id is catalogue-wide, so it cannot be shown to the learner:
+        // hadith #100 in the table may be the 4th of الأربعون النووية.
+        Sanctum::actingAs(User::factory()->admin()->create());
+        $book = Book::factory()->create();
+        $other = Book::factory()->create();
+
+        // Numbering continues per book when it is not given.
+        $first = $this->postJson('/api/v1/admin/hadiths', [
+            'book_id' => $book->id,
+            'title' => 'الأول',
+            'text' => 'متن الأول',
+        ])->assertCreated()->assertJsonPath('data.number_in_book', 1)->json('data.id');
+
+        $this->postJson('/api/v1/admin/hadiths', [
+            'book_id' => $book->id,
+            'title' => 'الثاني',
+            'text' => 'متن الثاني',
+        ])->assertCreated()->assertJsonPath('data.number_in_book', 2);
+
+        // Each book numbers from one, independently.
+        $this->postJson('/api/v1/admin/hadiths', [
+            'book_id' => $other->id,
+            'title' => 'أول كتاب آخر',
+            'text' => 'متن',
+        ])->assertCreated()->assertJsonPath('data.number_in_book', 1);
+
+        // And it can be set explicitly — the published number of a numbered
+        // collection is not always the insertion order.
+        $this->patchJson("/api/v1/admin/hadiths/{$first}", ['number_in_book' => 40])
+            ->assertOk()
+            ->assertJsonPath('data.number_in_book', 40);
+
+        $this->assertDatabaseHas('hadiths', ['id' => $first, 'number_in_book' => 40]);
+    }
+
     public function test_admin_can_manage_nested_terms_and_aids(): void
     {
         Sanctum::actingAs(User::factory()->admin()->create());

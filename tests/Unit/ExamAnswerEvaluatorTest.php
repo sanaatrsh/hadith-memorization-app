@@ -3,7 +3,6 @@
 namespace Tests\Unit;
 
 use App\Enums\ExamQuestionType;
-use App\Models\ExamQuestion;
 use App\Services\ExamAnswerEvaluator;
 use Illuminate\Support\Facades\Http;
 use PHPUnit\Framework\Attributes\DataProvider;
@@ -19,13 +18,14 @@ class ExamAnswerEvaluatorTest extends TestCase
 {
     private function evaluate(string $correct, string $answer, ExamQuestionType $type = ExamQuestionType::Written): array
     {
-        $question = new ExamQuestion([
-            'type' => $type,
-            'question_text' => 'من هو راوي هذا الحديث؟',
-            'correct_answer' => $correct,
-        ]);
-
-        return app(ExamAnswerEvaluator::class)->evaluate($question, $answer);
+        // The reference answer belongs to the item, not the wording: the same
+        // question is asked about several hadiths, each with its own answer.
+        return app(ExamAnswerEvaluator::class)->evaluateAnswer(
+            'من هو راوي هذا الحديث؟',
+            $type,
+            $correct,
+            $answer,
+        );
     }
 
     private function fakeGeminiGrade(bool $isCorrect, int $score, string $feedback = 'ملاحظة'): void

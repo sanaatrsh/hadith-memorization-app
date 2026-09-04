@@ -14,6 +14,9 @@ class HadithResource extends JsonResource
         return [
             'id' => $this->id,
             'book_id' => $this->book_id,
+            // The hadith's number inside its own collection: hadith #100 in
+            // the table is the 4th hadith of الأربعون النووية.
+            'number_in_book' => $this->number_in_book,
             'narrator_id' => $this->narrator_id,
             'title' => $this->title,
             // The isnad/context line the hadith opens with (مقدمة الحديث).

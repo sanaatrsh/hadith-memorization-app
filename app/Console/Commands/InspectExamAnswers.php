@@ -5,9 +5,10 @@ namespace App\Console\Commands;
 use App\Models\Exam;
 use App\Models\ExamAnswer;
 use Illuminate\Console\Command;
+use Illuminate\Support\Collection;
 
 /**
- * Shows how each answer of an exam was actually graded.
+ * Shows how each item of an exam was actually graded.
  *
  * The app renders the answer the learner typed from its own state, so a wrong
  * verdict on screen can mean three different things: the answer never reached
@@ -33,27 +34,32 @@ class InspectExamAnswers extends Command
             return self::FAILURE;
         }
 
-        $exam->load(['questions.answer', 'user']);
+        $exam->load(['user', 'book']);
+
+        /** @var Collection<int,ExamAnswer> $items */
+        $items = $exam->items()->with(['question', 'hadith'])->get();
 
         $this->components->info("Exam #{$exam->id}");
         $this->components->twoColumnDetail('User', (string) $exam->user?->email);
+        $this->components->twoColumnDetail('Book', (string) $exam->book?->title);
         $this->components->twoColumnDetail('Status', $exam->status);
         $this->components->twoColumnDetail('Score', (string) ($exam->score ?? '—'));
-        $this->components->twoColumnDetail('Questions', (string) $exam->questions->count());
+        $this->components->twoColumnDetail('Questions', (string) $exam->questions()->count());
+        $this->components->twoColumnDetail('Items', (string) $items->count());
         $this->components->twoColumnDetail('Created', (string) $exam->created_at);
         $this->newLine();
 
         $answered = 0;
         $graders = [];
 
-        foreach ($exam->questions as $question) {
-            /** @var ?ExamAnswer $answer */
-            $answer = $question->answer;
+        foreach ($items as $item) {
+            $hadith = $item->hadith?->number_in_book ?? '?';
 
-            $this->line("<fg=cyan>Q{$question->sort_order}</> {$question->question_text}");
-            $this->components->twoColumnDetail('  stored correct_answer', $this->short((string) $question->correct_answer));
+            $this->line("<fg=cyan>#{$item->id}</> Q{$item->exam_question_id} · حديث {$hadith} — {$item->question?->question_text}");
+            $this->components->twoColumnDetail('  hadith', $this->short((string) $item->hadith?->title));
+            $this->components->twoColumnDetail('  stored correct_answer', $this->short((string) $item->correct_answer));
 
-            if ($answer === null) {
+            if (! $item->isAnswered()) {
                 $this->components->twoColumnDetail('  answer', '<fg=red>none stored — the app never sent one</>');
                 $this->newLine();
 
@@ -61,18 +67,18 @@ class InspectExamAnswers extends Command
             }
 
             $answered++;
-            $report = $answer->evaluation_report ?? [];
+            $report = $item->evaluation_report ?? [];
             $mode = $report['mode'] ?? '<none>';
             $graders[$mode] = ($graders[$mode] ?? 0) + 1;
 
-            $text = (string) $answer->answer_text;
+            $text = (string) $item->answer_text;
             $this->components->twoColumnDetail(
                 '  answer_text as received',
                 trim($text) === '' ? '<fg=red>EMPTY — nothing reached the server</>' : $this->short($text),
             );
             $this->components->twoColumnDetail(
                 '  verdict',
-                ($answer->is_correct ? '<fg=green>correct</>' : '<fg=red>wrong</>')." (score {$answer->score})",
+                ($item->is_correct ? '<fg=green>correct</>' : '<fg=red>wrong</>')." (score {$item->score})",
             );
             $this->components->twoColumnDetail('  graded by', $this->describeMode($mode));
 
@@ -87,12 +93,12 @@ class InspectExamAnswers extends Command
                 $this->components->twoColumnDetail('  feedback_ar', $this->short((string) $report['feedback_ar']));
             }
 
-            $this->components->twoColumnDetail('  graded at', (string) $answer->updated_at);
+            $this->components->twoColumnDetail('  graded at', (string) $item->updated_at);
             $this->newLine();
         }
 
         $this->components->info('Summary');
-        $this->components->twoColumnDetail('Answers stored', $answered.' of '.$exam->questions->count());
+        $this->components->twoColumnDetail('Answers stored', $answered.' of '.$items->count());
 
         foreach ($graders as $mode => $count) {
             $this->components->twoColumnDetail("Graded by {$mode}", (string) $count);
@@ -100,7 +106,7 @@ class InspectExamAnswers extends Command
 
         if (isset($graders['exact_match']) || isset($graders['<none>'])) {
             $this->newLine();
-            $this->components->warn('Some answers carry no grading mode, or the retired exact_match one: those rows were written by an older build. Their stored result never changes — create a new exam to see current grading.');
+            $this->components->warn('Some answers carry no grading mode, or the retired exact_match one: those rows were written by an older build. Their stored result never changes — open the exam again to see current grading.');
         }
 
         return self::SUCCESS;

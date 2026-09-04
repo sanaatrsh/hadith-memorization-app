@@ -1,9 +1,9 @@
 # Athar — ERD
 
-The database has 25 tables, but 10 of them are not domain tables: Laravel's own
+The database has 27 tables, but 10 of them are not domain tables: Laravel's own
 `migrations`, `cache`, `cache_locks`, `jobs`, `job_batches`, `failed_jobs`,
 `sessions`, `password_reset_tokens`, plus `media` (Spatie, polymorphic) and
-`personal_access_tokens` (Sanctum). The remaining 15 are below.
+`personal_access_tokens` (Sanctum). The remaining 17 are below.
 
 ## Core
 
@@ -23,10 +23,10 @@ erDiagram
     HADITHS ||--o{ MEMORIZATION_STACK_ITEMS : "queued as"
 
     USERS ||--o{ EXAMS : takes
-    BOOKS ||--o{ EXAMS : "examined via"
+    BOOKS ||--o| EXAMS : "examined by one"
     EXAMS ||--o{ EXAM_QUESTIONS : contains
-    HADITHS ||--o{ EXAM_QUESTIONS : "asked about"
-    EXAM_QUESTIONS ||--o| EXAM_ANSWERS : "answered by"
+    EXAM_QUESTIONS ||--o{ EXAM_ANSWERS : "asked once per hadith"
+    HADITHS ||--o{ EXAM_ANSWERS : "asked about"
 
     USERS {
         bigint id PK
@@ -45,6 +45,7 @@ erDiagram
     HADITHS {
         bigint id PK
         bigint book_id FK
+        int number_in_book "UK with book_id"
         bigint narrator_id FK "nullable"
         string title
         text intro "nullable"
@@ -85,9 +86,9 @@ erDiagram
 
     EXAMS {
         bigint id PK
-        bigint user_id FK
+        bigint user_id FK "UK with book_id"
         bigint book_id FK
-        int question_count
+        int question_count "number of items"
         string status "in_progress | completed"
         tinyint score "nullable"
     }
@@ -95,26 +96,39 @@ erDiagram
     EXAM_QUESTIONS {
         bigint id PK
         bigint exam_id FK
-        bigint hadith_id FK
         bigint question_template_id FK "nullable"
         string type "written | voice"
-        text question_text
-        text correct_answer "nullable"
+        text question_text "names no hadith"
+        int sort_order
     }
 
     EXAM_ANSWERS {
         bigint id PK
-        bigint exam_question_id FK "UK, unique"
+        bigint exam_question_id FK "UK with hadith_id"
+        bigint hadith_id FK
+        text correct_answer "nullable"
         text answer_text "nullable"
         tinyint score
         boolean is_correct
+        timestamp answered_at "nullable"
     }
 ```
+
+One question, many answers. The wording is stored once in `exam_questions` and
+names no hadith; `exam_answers` holds one row per hadith the question is asked
+about, carrying that hadith's own reference answer alongside what the learner
+submitted. A row of `exam_answers` is therefore one *item* of the exam: it is
+what gets answered and scored, and the exam's length is its number of items,
+not of wordings.
+
+`exams` is unique on (`user_id`, `book_id`): every book has one exam per
+learner, and retaking it resets that exam rather than piling up another.
 
 ## Full
 
 Adds content enrichment (`narrators`, `hadith_terms`, `hadith_aids`), the exam
-question bank (`question_templates`), and the two admin logs
+question bank (`question_templates`), the daily review sitting
+(`review_sessions`, `review_session_items`), and the two admin logs
 (`progress_audits`, `hadith_imports`).
 
 ```mermaid
@@ -138,11 +152,16 @@ erDiagram
     HADITHS ||--o{ PROGRESS_AUDITS : "audited on"
 
     USERS ||--o{ EXAMS : takes
-    BOOKS ||--o{ EXAMS : "examined via"
+    BOOKS ||--o| EXAMS : "examined by one"
     EXAMS ||--o{ EXAM_QUESTIONS : contains
-    HADITHS ||--o{ EXAM_QUESTIONS : "asked about"
-    QUESTION_TEMPLATES |o--o{ EXAM_QUESTIONS : generates
-    EXAM_QUESTIONS ||--o| EXAM_ANSWERS : "answered by"
+    QUESTION_TEMPLATES |o--o{ EXAM_QUESTIONS : words
+    EXAM_QUESTIONS ||--o{ EXAM_ANSWERS : "asked once per hadith"
+    HADITHS ||--o{ EXAM_ANSWERS : "asked about"
+
+    USERS ||--o{ REVIEW_SESSIONS : sits
+    REVIEW_SESSIONS ||--o{ REVIEW_SESSION_ITEMS : snapshots
+    HADITHS ||--o{ REVIEW_SESSION_ITEMS : "reviewed in"
+    MEMORIZATION_ATTEMPTS |o--o| REVIEW_SESSION_ITEMS : "scored by"
 
     USERS ||--o{ HADITH_IMPORTS : uploads
 
@@ -172,6 +191,7 @@ erDiagram
     HADITHS {
         bigint id PK
         bigint book_id FK
+        int number_in_book "UK with book_id"
         bigint narrator_id FK "nullable"
         string title
         text intro "nullable"
@@ -249,31 +269,52 @@ erDiagram
 
     EXAMS {
         bigint id PK
-        bigint user_id FK
+        bigint user_id FK "UK with book_id"
         bigint book_id FK
-        int question_count
+        int question_count "number of items"
         string status "in_progress | completed"
+        timestamp started_at "nullable"
+        timestamp completed_at "nullable"
         tinyint score "nullable"
     }
 
     EXAM_QUESTIONS {
         bigint id PK
         bigint exam_id FK
-        bigint hadith_id FK
         bigint question_template_id FK "nullable"
         string type "written | voice"
-        text question_text
-        text correct_answer "nullable"
+        text question_text "names no hadith"
         int sort_order
     }
 
     EXAM_ANSWERS {
         bigint id PK
-        bigint exam_question_id FK "UK, unique"
+        bigint exam_question_id FK "UK with hadith_id"
+        bigint hadith_id FK
+        text correct_answer "nullable"
         text answer_text "nullable"
         tinyint score
         boolean is_correct
         json evaluation_report "nullable"
+        timestamp answered_at "nullable"
+        int sort_order
+    }
+
+    REVIEW_SESSIONS {
+        bigint id PK
+        bigint user_id FK
+        string status "in_progress | completed"
+        timestamp started_at
+        timestamp completed_at "nullable"
+        tinyint score "nullable"
+    }
+
+    REVIEW_SESSION_ITEMS {
+        bigint id PK
+        bigint review_session_id FK "UK with hadith_id"
+        bigint hadith_id FK
+        bigint memorization_attempt_id FK "nullable"
+        int sort_order
     }
 
     HADITH_IMPORTS {

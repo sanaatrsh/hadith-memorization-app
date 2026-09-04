@@ -99,6 +99,8 @@ Route::prefix('v1')->group(function () {
         Route::post('/exams', [ExamController::class, 'store']);
         Route::get('/exams/{exam}', [ExamController::class, 'show']);
         Route::post('/exams/{exam}/complete', [ExamController::class, 'complete']);
+        // A book has one exam per learner, so it can be reached by the book.
+        Route::get('/books/{book}/exam', [ExamController::class, 'forBook']);
     });
 
     // --- Public / user content (active only) ---

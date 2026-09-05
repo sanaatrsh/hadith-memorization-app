@@ -79,12 +79,69 @@ class GeminiExamAnswerGrader implements ExamAnswerGrader
      */
     public function grade(array $context): ExamAnswerGradeData
     {
-        $result = $this->transport->send(
+        return $this->interpret($this->transport->send(
             self::SYSTEM_INSTRUCTION,
             $this->input($context),
             $this->responseSchema(),
-        );
+        ));
+    }
 
+    /**
+     * The whole batch, sent concurrently and in bounded chunks.
+     *
+     * Chunking caps how many calls are in flight at once: a 200-answer exam
+     * would otherwise open 200 sockets and trip Gemini's rate limit, turning a
+     * slow request into a failed one. And a wall-clock budget stops the run
+     * once it has taken long enough that the gateway is about to give up —
+     * whatever is left is reported unavailable, so the caller grades it
+     * deterministically instead of the learner seeing a 504.
+     *
+     * @param  array<array-key, array<string,mixed>>  $contexts
+     * @return array<array-key, ExamAnswerGradeData>
+     */
+    public function gradeMany(array $contexts): array
+    {
+        if ($contexts === []) {
+            return [];
+        }
+
+        $concurrency = max((int) config('services.gemini.batch_concurrency', 10), 1);
+        $budget = (float) config('services.gemini.batch_budget', 25);
+        $startedAt = microtime(true);
+
+        $graded = [];
+
+        foreach (array_chunk($contexts, $concurrency, preserve_keys: true) as $chunk) {
+            if (microtime(true) - $startedAt >= $budget) {
+                foreach ($chunk as $key => $context) {
+                    $graded[$key] = ExamAnswerGradeData::unavailable(
+                        'grading_budget_exhausted',
+                        'The batch exceeded its grading time budget before this answer was reached.',
+                    );
+                }
+
+                continue;
+            }
+
+            $requests = array_map(fn (array $context) => [
+                'system' => self::SYSTEM_INSTRUCTION,
+                'input' => $this->input($context),
+                'schema' => $this->responseSchema(),
+            ], $chunk);
+
+            foreach ($this->transport->sendMany($requests) as $key => $result) {
+                $graded[$key] = $this->interpret($result);
+            }
+        }
+
+        return $graded;
+    }
+
+    /**
+     * @param  array{body:?array<string,mixed>, model:string, failure_code:?string, failure_message:?string}  $result
+     */
+    private function interpret(array $result): ExamAnswerGradeData
+    {
         if ($result['body'] === null) {
             return ExamAnswerGradeData::unavailable(
                 (string) $result['failure_code'],

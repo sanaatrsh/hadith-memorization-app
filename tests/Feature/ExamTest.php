@@ -9,6 +9,7 @@ use App\Models\QuestionTemplate;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Http;
 use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
 
@@ -624,6 +625,109 @@ class ExamTest extends TestCase
             ->assertJsonPath('data.status', 'completed')
             ->assertJsonPath('data.score', 0)
             ->assertJsonPath('data.summary.unanswered_count', 1);
+    }
+
+    private function fakeGemini(int $status = 200): void
+    {
+        config()->set('services.gemini.api_key', 'test-key');
+        config()->set('services.gemini.model', 'gemini-test');
+
+        Http::preventStrayRequests();
+        Http::fake([
+            'generativelanguage.googleapis.com/*' => Http::response(
+                $status === 200
+                    ? ['candidates' => [['content' => ['parts' => [['text' => json_encode([
+                        'is_correct' => true, 'score' => 100, 'feedback_ar' => 'صحيح',
+                    ], JSON_UNESCAPED_UNICODE)]]]]]]
+                    : ['error' => ['message' => 'boom']],
+                $status,
+            ),
+        ]);
+    }
+
+    public function test_completing_grades_the_whole_batch_concurrently(): void
+    {
+        // Sequentially this was one Gemini call after another, and a whole
+        // exam took long enough for the gateway to answer the app with a 504
+        // before any score came back.
+        $this->fakeGemini();
+
+        Sanctum::actingAs(User::factory()->create());
+        $book = $this->setupBook(hadiths: 3);
+        QuestionTemplate::factory()->narrator()->create();
+
+        $examId = $this->postJson('/api/v1/exams', ['book_id' => $book->id])->json('data.id');
+        $items = $this->items($examId);
+
+        $response = $this->postJson("/api/v1/exams/{$examId}/complete", [
+            'answers' => array_map(
+                fn (array $item) => ['item_id' => $item['id'], 'answer' => 'عمر'],
+                $items,
+            ),
+        ])
+            ->assertOk()
+            ->assertJsonPath('data.score', 100)
+            ->assertJsonPath('data.summary.answered_count', 3);
+
+        // One call per answer — sent as a pool, not one after another.
+        Http::assertSentCount(3);
+
+        foreach ($response->json('data.items') as $item) {
+            $this->assertSame('gemini', $item['evaluation_report']['mode']);
+        }
+    }
+
+    public function test_completing_still_finishes_when_gemini_is_down(): void
+    {
+        // The whole point of the fallback: an AI outage must never leave the
+        // learner without a result.
+        $this->fakeGemini(status: 503);
+
+        Sanctum::actingAs(User::factory()->create());
+        $book = $this->setupBook(hadiths: 2);
+        QuestionTemplate::factory()->narrator()->create();
+
+        $examId = $this->postJson('/api/v1/exams', ['book_id' => $book->id])->json('data.id');
+        $items = $this->items($examId);
+
+        $response = $this->postJson("/api/v1/exams/{$examId}/complete", [
+            'answers' => array_map(
+                fn (array $item) => ['item_id' => $item['id'], 'answer' => 'عمر بن الخطاب'],
+                $items,
+            ),
+        ])
+            ->assertOk()
+            ->assertJsonPath('data.status', 'completed')
+            ->assertJsonPath('data.summary.answered_count', 2);
+
+        foreach ($response->json('data.items') as $item) {
+            $this->assertSame('token_match', $item['evaluation_report']['mode']);
+            $this->assertFalse($item['evaluation_report']['ai_available']);
+            // Deterministically correct, so the outage costs the learner nothing.
+            $this->assertTrue($item['is_correct']);
+        }
+    }
+
+    public function test_an_unanswered_item_in_the_batch_never_reaches_gemini(): void
+    {
+        $this->fakeGemini();
+
+        Sanctum::actingAs(User::factory()->create());
+        $book = $this->setupBook(hadiths: 2);
+        QuestionTemplate::factory()->narrator()->create();
+
+        $examId = $this->postJson('/api/v1/exams', ['book_id' => $book->id])->json('data.id');
+        $items = $this->items($examId);
+
+        $this->postJson("/api/v1/exams/{$examId}/complete", [
+            'answers' => [
+                ['item_id' => $items[0]['id'], 'answer' => 'عمر'],
+                ['item_id' => $items[1]['id'], 'answer' => ''],
+            ],
+        ])->assertOk();
+
+        // Only the answered one is worth an AI call.
+        Http::assertSentCount(1);
     }
 
     public function test_user_cannot_access_another_users_exam(): void

@@ -78,7 +78,6 @@ class DashboardController extends Controller
         $activeDays = $this->activity->activeDays($user);
 
         return ApiResponse::success([
-            'active_books' => BookResource::collection($activeBooks),
             'total_books' => $totalBooks,
             'total_hadiths' => $totalHadiths,
             'not_started' => $notStarted,

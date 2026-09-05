@@ -33,6 +33,65 @@ class GeminiConfigTest extends TestCase
         ]);
     }
 
+    public function test_a_batch_is_graded_concurrently_in_one_pool(): void
+    {
+        // The reason this exists: grading a whole exam one call after another
+        // made the request as slow as their sum, and the gateway answered the
+        // app with a 504 before any score came back.
+        $this->fakeSuccess(['is_correct' => true, 'score' => 100, 'feedback_ar' => 'صحيح']);
+
+        $contexts = [];
+
+        foreach (['أبي ذر', 'عمر', 'تميم الداري'] as $index => $answer) {
+            $contexts['item-'.$index] = [
+                'question_text' => 'من هو راوي هذا الحديث؟',
+                'correct_answer' => 'أبو ذر الغفاري',
+                'answer_text' => $answer,
+                'question_kind' => 'factual',
+            ];
+        }
+
+        $grades = app(ExamAnswerGrader::class)->gradeMany($contexts);
+
+        // One call per answer, and every result kept its own key.
+        Http::assertSentCount(3);
+        $this->assertSame(['item-0', 'item-1', 'item-2'], array_keys($grades));
+
+        foreach ($grades as $grade) {
+            $this->assertTrue($grade->available);
+            $this->assertSame(100, $grade->score);
+        }
+    }
+
+    public function test_an_empty_batch_never_reaches_the_network(): void
+    {
+        $this->fakeSuccess(['is_correct' => true, 'score' => 100, 'feedback_ar' => 'صحيح']);
+
+        $this->assertSame([], app(ExamAnswerGrader::class)->gradeMany([]));
+
+        Http::assertNothingSent();
+    }
+
+    public function test_a_batch_without_a_key_reports_every_entry_unavailable(): void
+    {
+        config()->set('services.gemini.api_key', '');
+        Http::preventStrayRequests();
+
+        $grades = app(ExamAnswerGrader::class)->gradeMany([
+            'a' => ['question_text' => 'س', 'correct_answer' => 'ج', 'answer_text' => 'ج', 'question_kind' => 'factual'],
+            'b' => ['question_text' => 'س', 'correct_answer' => 'ج', 'answer_text' => 'ج', 'question_kind' => 'factual'],
+        ]);
+
+        $this->assertSame(['a', 'b'], array_keys($grades));
+
+        foreach ($grades as $grade) {
+            $this->assertFalse($grade->available);
+            $this->assertSame('missing_api_key', $grade->failureCode);
+        }
+
+        Http::assertNothingSent();
+    }
+
     public function test_gemini_credentials_are_read_from_server_config_only(): void
     {
         config()->set('services.gemini.api_key', 'test-key');

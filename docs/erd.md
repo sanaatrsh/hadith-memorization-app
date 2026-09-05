@@ -5,13 +5,26 @@ The database has 27 tables, but 10 of them are not domain tables: Laravel's own
 `sessions`, `password_reset_tokens`, plus `media` (Spatie, polymorphic) and
 `personal_access_tokens` (Sanctum). The remaining 17 are below.
 
+The same schema written out as SQL is in [`schema.sql`](schema.sql) — MySQL 8
+DDL, split into the same two levels: Part 1 is the ten *Core* tables and runs
+on its own, Part 2 adds the other seven.
+
 ## Core
 
-The nine tables the memorization and exam flows actually run on.
+The ten tables the memorization and exam flows actually run on: identity (1),
+content (3), memorization (3), exam (3).
+
+Left out, and shown in *Full* below: the enrichment a hadith carries
+(`hadith_terms`, `hadith_aids`), the daily sitting that is snapshotted from
+`user_hadith_progress` rather than a source of truth of its own
+(`review_sessions`, `review_session_items`), the question bank an exam is built
+from (`question_templates`), and the two admin logs (`progress_audits`,
+`hadith_imports`).
 
 ```mermaid
 erDiagram
     BOOKS ||--o{ HADITHS : contains
+    NARRATORS |o--o{ HADITHS : narrates
 
     USERS ||--o{ USER_HADITH_PROGRESS : tracks
     HADITHS ||--o{ USER_HADITH_PROGRESS : "tracked in"
@@ -40,6 +53,12 @@ erDiagram
         string title
         boolean is_active
         int sort_order
+    }
+
+    NARRATORS {
+        bigint id PK
+        string name
+        text biography
     }
 
     HADITHS {

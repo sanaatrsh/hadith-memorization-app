@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api\V1;
 
 use App\Actions\Exam\GenerateExam;
+use App\Enums\ExamQuestionType;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\CompleteExamRequest;
 use App\Http\Requests\StoreExamAnswerRequest;
@@ -280,8 +281,18 @@ class ExamController extends Controller
             return ApiResponse::error(implode(' ', array_unique($errors)), 422);
         }
 
-        foreach ($resolved as [$item, $text]) {
-            $this->recordAnswer($item, $text, $evaluator);
+        // Graded as one batch, not one call after another: a whole exam's worth
+        // of sequential Gemini calls is slow enough for a gateway to time the
+        // request out before the learner ever sees a score.
+        $results = $evaluator->evaluateMany(array_map(fn (array $pair) => [
+            'question_text' => (string) $pair[0]->question?->question_text,
+            'type' => $pair[0]->question?->type ?? ExamQuestionType::Written,
+            'correct_answer' => (string) ($pair[0]->correct_answer ?? ''),
+            'answer_text' => $pair[1],
+        ], $resolved));
+
+        foreach ($resolved as $index => [$item, $text]) {
+            $this->storeAnswer($item, $text, $results[$index]);
         }
 
         return null;
@@ -348,8 +359,14 @@ class ExamController extends Controller
 
     private function recordAnswer(ExamAnswer $item, string $answerText, ExamAnswerEvaluator $evaluator): void
     {
-        $result = $evaluator->evaluate($item, $answerText);
+        $this->storeAnswer($item, $answerText, $evaluator->evaluate($item, $answerText));
+    }
 
+    /**
+     * @param  array{score:int, is_correct:bool, report:array<string,mixed>}  $result
+     */
+    private function storeAnswer(ExamAnswer $item, string $answerText, array $result): void
+    {
         $item->update([
             'answer_text' => $answerText,
             'score' => $result['score'],

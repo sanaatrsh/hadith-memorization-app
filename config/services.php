@@ -42,6 +42,15 @@ return [
         'timeout' => (int) env('GEMINI_TIMEOUT_SECONDS', 30),
         'connect_timeout' => (int) env('GEMINI_CONNECT_TIMEOUT_SECONDS', 5),
         'retry_times' => (int) env('GEMINI_RETRY_TIMES', 2),
+
+        // Completing an exam grades every answer at once, concurrently. These
+        // bound that batch so the request always returns before a gateway
+        // gives up on it: a shorter per-call timeout than a lone call gets, a
+        // cap on how many calls are in flight, and a wall-clock budget after
+        // which the rest degrade to the deterministic comparison.
+        'batch_timeout' => (int) env('GEMINI_BATCH_TIMEOUT_SECONDS', 20),
+        'batch_concurrency' => (int) env('GEMINI_BATCH_CONCURRENCY', 10),
+        'batch_budget' => (int) env('GEMINI_BATCH_BUDGET_SECONDS', 25),
         'store' => filter_var(env('GEMINI_STORE', false), FILTER_VALIDATE_BOOL),
     ],
 

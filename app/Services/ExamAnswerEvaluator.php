@@ -54,6 +54,57 @@ class ExamAnswerEvaluator
     }
 
     /**
+     * Grade a whole set of items at once.
+     *
+     * Completing an exam submits every answer together, so grading them one
+     * call after another makes the request as slow as their sum. This asks the
+     * grader for the whole batch, which issues the calls concurrently; an
+     * entry Gemini could not judge still falls back on its own.
+     *
+     * @param  array<array-key, array{question_text:string, type:ExamQuestionType, correct_answer:string, answer_text:string}>  $items
+     * @return array<array-key, array{score:int, is_correct:bool, report:array<string,mixed>}>
+     */
+    public function evaluateMany(array $items): array
+    {
+        $results = [];
+        $toGrade = [];
+
+        foreach ($items as $key => $item) {
+            $correct = $item['correct_answer'];
+            $answer = $item['answer_text'];
+            $isFactual = $item['type'] === ExamQuestionType::Written && $this->isFactual($correct);
+
+            // Nothing to send: no answer, or no reference to judge it against.
+            if (trim($answer) === '' || trim($correct) === '') {
+                $results[$key] = $this->fallback($correct, $answer, $isFactual);
+
+                continue;
+            }
+
+            $toGrade[$key] = [
+                'question_text' => $item['question_text'],
+                'correct_answer' => $correct,
+                'answer_text' => $answer,
+                'question_kind' => $isFactual ? 'factual' : 'recall',
+            ];
+        }
+
+        $grades = $this->grader->gradeMany($toGrade);
+
+        foreach ($toGrade as $key => $context) {
+            $grade = $grades[$key] ?? null;
+            $isFactual = $context['question_kind'] === 'factual';
+
+            $results[$key] = $grade !== null && $grade->available
+                ? $this->fromGrade($grade)
+                : $this->fallback($context['correct_answer'], $context['answer_text'], $isFactual, $grade);
+        }
+
+        // Back into the order the caller passed them in.
+        return array_map(fn ($key) => $results[$key], array_combine(array_keys($items), array_keys($items)));
+    }
+
+    /**
      * @return array{score:int, is_correct:bool, report:array<string,mixed>}
      */
     public function evaluateAnswer(string $questionText, ExamQuestionType $type, string $correct, string $answerText): array
